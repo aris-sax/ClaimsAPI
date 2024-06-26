@@ -53,24 +53,38 @@ def clean_text(text):
     return ''.join(ch for ch in text if unicodedata.category(ch)[0] != 'C')
 
 def extract_text_and_images(pdf_path):
-    reader = PdfReader(pdf_path)
-    number_of_pages = len(reader.pages)
+    try:
+        reader = PdfReader(pdf_path)
+        number_of_pages = len(reader.pages)
 
-    text = []
-    for i, page in enumerate(reader.pages):
-        page_text = page.extract_text()
-        cleaned_text = clean_text(page_text)
-        text.append(f"Content of page {i+1}:\n{cleaned_text}\n")
+        text = []
+        images = []
 
-    images = []
-    for i, page in enumerate(reader.pages):
-        for j, image in enumerate(page.images):
-            img = Image.open(io.BytesIO(image.data))
-            img_path = f"{EXTRACTED_IMAGES_FOLDER}/image_page_{i+1}_{j+1}.png"
-            img.save(img_path)
-            images.append((i+1, j+1, img_path))
+        for i, page in enumerate(reader.pages):
+            try:
+                page_text = page.extract_text()
+                cleaned_text = clean_text(page_text)
+                text.append(f"Content of page {i+1}:\n{cleaned_text}\n")
+            except Exception as e:
+                print(f"Error extracting text from page {i+1}: {str(e)}")
 
-    return "".join(text), images
+            try:
+                for j, image in enumerate(page.images):
+                    try:
+                        img = Image.open(io.BytesIO(image.data))
+                        img_path = f"{EXTRACTED_IMAGES_FOLDER}/image_page_{i+1}_{j+1}.png"
+                        img.save(img_path)
+                        images.append((i+1, j+1, img_path))
+                    except Exception as e:
+                        print(f"Error saving image {j+1} from page {i+1}: {str(e)}")
+            except Exception as e:
+                print(f"Error processing images on page {i+1}: {str(e)}")
+
+        return "".join(text), images
+
+    except Exception as e:
+        print(f"Error processing PDF: {str(e)}")
+        return "", []
 
 def encode_image(image_path):
     with open(image_path, "rb") as image_file:
