@@ -1,5 +1,5 @@
 import unicodedata
-from pypdf import PdfReader
+import fitz  # PyMuPDF
 from PIL import Image
 import io
 import os
@@ -54,31 +54,34 @@ def clean_text(text):
 
 def extract_text_and_images(pdf_path):
     try:
-        reader = PdfReader(pdf_path)
-        number_of_pages = len(reader.pages)
-
+        doc = fitz.open(pdf_path)
         text = []
         images = []
 
-        for i, page in enumerate(reader.pages):
+        for page_num, page in enumerate(doc):
             try:
-                page_text = page.extract_text()
+                page_text = page.get_text()
                 cleaned_text = clean_text(page_text)
-                text.append(f"Content of page {i+1}:\n{cleaned_text}\n")
+                text.append(f"Content of page {page_num + 1}:\n{cleaned_text}\n")
             except Exception as e:
-                print(f"Error extracting text from page {i+1}: {str(e)}")
+                print(f"Error extracting text from page {page_num + 1}: {str(e)}")
 
             try:
-                for j, image in enumerate(page.images):
+                image_list = page.get_images(full=True)
+                for img_index, img in enumerate(image_list):
                     try:
-                        img = Image.open(io.BytesIO(image.data))
-                        img_path = f"{EXTRACTED_IMAGES_FOLDER}/image_page_{i+1}_{j+1}.png"
+                        xref = img[0]
+                        base_image = doc.extract_image(xref)
+                        image_bytes = base_image["image"]
+                        
+                        img = Image.open(io.BytesIO(image_bytes))
+                        img_path = f"{EXTRACTED_IMAGES_FOLDER}/image_page_{page_num + 1}_{img_index + 1}.png"
                         img.save(img_path)
-                        images.append((i+1, j+1, img_path))
+                        images.append((page_num + 1, img_index + 1, img_path))
                     except Exception as e:
-                        print(f"Error saving image {j+1} from page {i+1}: {str(e)}")
+                        print(f"Error saving image {img_index + 1} from page {page_num + 1}: {str(e)}")
             except Exception as e:
-                print(f"Error processing images on page {i+1}: {str(e)}")
+                print(f"Error processing images on page {page_num + 1}: {str(e)}")
 
         return "".join(text), images
 
@@ -108,32 +111,39 @@ def process_annotation(annotation):
 api_key = os.getenv('ANTHROPIC_API_KEY')
 
 async def process_pdf_task(pdf_path: str, task_id: str):
-    client = Anthropic(api_key=api_key)
-    text, images = extract_text_and_images(pdf_path)
-    
-    content = [
-        {
-            "type": "text",
-            "text": f"Here is the text of the academic paper:\n\n{text}\n\nNow I will provide the images from the paper."
-        }
-    ]
-
-    for page_num, img_num, img_path in images:
-        encoded_image = encode_image(img_path)
-        content.extend([
-            {
-                "type": "image",
-                "image_url": f"data:image/png;base64,{encoded_image}"
-            },
+    try:
+        client = Anthropic(api_key=api_key)
+        text, images = extract_text_and_images(pdf_path)
+        
+        if not text and not images:
+            raise Exception("Failed to extract any content from the PDF")
+        
+        content = [
             {
                 "type": "text",
-                "text": f"This is image {img_num} from page {page_num} of the paper."
+                "text": f"Here is the text of the academic paper:\n\n{text}\n\nNow I will provide the images from the paper."
             }
-        ])
+        ]
 
-    content.append({
-        "type": "text",
-        "text": """You are a highly capable AI assistant tasked with extracting and organizing information from a scientific paper about a drug to then be used on the drug's website. Follow these instructions carefully:
+        for page_num, img_num, img_path in images:
+            try:
+                encoded_image = encode_image(img_path)
+                content.extend([
+                    {
+                        "type": "image",
+                        "image_url": f"data:image/png;base64,{encoded_image}"
+                    },
+                    {
+                        "type": "text",
+                        "text": f"This is image {img_num} from page {page_num} of the paper."
+                    }
+                ])
+            except Exception as e:
+                print(f"Error encoding image {img_num} from page {page_num}: {str(e)}")
+
+        content.append({
+            "type": "text",
+            "text": """You are a highly capable AI assistant tasked with extracting and organizing information from a scientific paper about a drug to then be used on the drug's website. Follow these instructions carefully:
 
 1. CLAIM EXTRACTION:
    - Identify all claims related to: 
@@ -187,30 +197,38 @@ async def process_pdf_task(pdf_path: str, task_id: str):
    - Make sure all citations are consistent and all annotations follow the same format
 
 Begin your output with the JSON object as specified in step 3. Do not include any text before or after the JSON output."""
-    })
+        })
 
-    messages = [
-        {
-            "role": "user",
-            "content": content
-        }
-    ]
+        messages = [
+            {
+                "role": "user",
+                "content": content
+            }
+        ]
 
-    completion = get_completion(client, messages)
+        completion = get_completion(client, messages)
+        
+        try:
+            output_json = json.loads(completion)
+            
+            for claim in output_json['extractedClaims']:
+                claim['annotation'] = process_annotation(claim['annotation'])
+            
+            task_results[task_id] = {"state": "SUCCESS", "result": output_json}
+        except json.JSONDecodeError:
+            task_results[task_id] = {"state": "FAILURE", "error": "Invalid JSON output", "raw_output": completion}
+        
+    except Exception as e:
+        task_results[task_id] = {"state": "FAILURE", "error": str(e)}
     
-    try:
-        output_json = json.loads(completion)
-        
-        for claim in output_json['extractedClaims']:
-            claim['annotation'] = process_annotation(claim['annotation'])
-        
-        os.remove(pdf_path)
-        for _, _, img_path in images:
-            os.remove(img_path)
-        
-        task_results[task_id] = {"state": "SUCCESS", "result": output_json}
-    except json.JSONDecodeError:
-        task_results[task_id] = {"state": "FAILURE", "error": "Invalid JSON output", "raw_output": completion}
+    finally:
+        # Clean up files
+        try:
+            os.remove(pdf_path)
+            for _, _, img_path in images:
+                os.remove(img_path)
+        except Exception as e:
+            print(f"Error cleaning up files: {str(e)}")
 
 class TaskResponse(BaseModel):
     task_id: str
