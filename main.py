@@ -91,43 +91,35 @@ def process_annotation(annotation):
         return ', '.join(parts[:-1] + [location])
     return annotation
 
-api_key = os.getenv('ANTHROPIC_API_KEY')
+api_key = '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'
 
 async def process_pdf_task(pdf_path: str, task_id: str):
-    try:
-        client = Anthropic(api_key=api_key)
-        text, images = extract_text_and_images(pdf_path)
-        
-        content = [
+    client = Anthropic(api_key=api_key)
+    text, images = extract_text_and_images(pdf_path)
+    
+    content = [
+        {
+            "type": "text",
+            "text": f"Here is the text of the academic paper:\n\n{text}\n\nNow I will provide the images from the paper."
+        }
+    ]
+
+    for page_num, img_num, img_path in images:
+        encoded_image = encode_image(img_path)
+        content.extend([
+            {
+                "type": "image",
+                "image_url": f"data:image/png;base64,{encoded_image}"
+            },
             {
                 "type": "text",
-                "text": f"Here is the text of the academic paper:\n\n{text}\n\nNow I will provide the images from the paper."
+                "text": f"This is image {img_num} from page {page_num} of the paper."
             }
-        ]
+        ])
 
-        for page_num, img_num, img_path in images:
-            try:
-                encoded_image = encode_image(img_path)
-                content.extend([
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "image/png",
-                            "data": encoded_image
-                        }
-                    },
-                    {
-                        "type": "text",
-                        "text": f"This is image {img_num} from page {page_num} of the paper."
-                    }
-                ])
-            except Exception as e:
-                print(f"Error encoding image {img_num} from page {page_num}: {str(e)}")
-
-        content.append({
-            "type": "text",
-            "text": """You are a highly capable AI assistant tasked with extracting and organizing information from a scientific paper about a drug to then be used on the drug's website. Follow these instructions carefully:
+    content.append({
+        "type": "text",
+        "text": """You are a highly capable AI assistant tasked with extracting and organizing information from a scientific paper about a drug to then be used on the drug's website. Follow these instructions carefully:
 
 1. CLAIM EXTRACTION:
    - Identify all claims related to: 
@@ -181,38 +173,30 @@ async def process_pdf_task(pdf_path: str, task_id: str):
    - Make sure all citations are consistent and all annotations follow the same format
 
 Begin your output with the JSON object as specified in step 3. Do not include any text before or after the JSON output."""
-        })
+    })
 
-        messages = [
-            {
-                "role": "user",
-                "content": content
-            }
-        ]
+    messages = [
+        {
+            "role": "user",
+            "content": content
+        }
+    ]
 
-        completion = get_completion(client, messages)
-        
-        try:
-            output_json = json.loads(completion)
-            
-            for claim in output_json['extractedClaims']:
-                claim['annotation'] = process_annotation(claim['annotation'])
-            
-            task_results[task_id] = {"state": "SUCCESS", "result": output_json}
-        except json.JSONDecodeError:
-            task_results[task_id] = {"state": "FAILURE", "error": "Invalid JSON output", "raw_output": completion}
-        
-    except Exception as e:
-        task_results[task_id] = {"state": "FAILURE", "error": str(e)}
+    completion = get_completion(client, messages)
     
-    finally:
-        # Clean up files
-        try:
-            os.remove(pdf_path)
-            for _, _, img_path in images:
-                os.remove(img_path)
-        except Exception as e:
-            print(f"Error cleaning up files: {str(e)}")
+    try:
+        output_json = json.loads(completion)
+        
+        for claim in output_json['extractedClaims']:
+            claim['annotation'] = process_annotation(claim['annotation'])
+        
+        os.remove(pdf_path)
+        for _, _, img_path in images:
+            os.remove(img_path)
+        
+        task_results[task_id] = {"state": "SUCCESS", "result": output_json}
+    except json.JSONDecodeError:
+        task_results[task_id] = {"state": "FAILURE", "error": "Invalid JSON output", "raw_output": completion}
 
 class TaskResponse(BaseModel):
     task_id: str
@@ -254,10 +238,4 @@ async def task_status(task_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
-
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.getenv("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
