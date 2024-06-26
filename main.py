@@ -131,7 +131,10 @@ async def process_pdf_task(pdf_path: str, task_id: str):
                 content.extend([
                     {
                         "type": "image",
-                        "image_url": f"data:image/png;base64,{encoded_image}"
+                        "image": {
+                            "type": "base64",
+                            "data": encoded_image
+                        }
                     },
                     {
                         "type": "text",
