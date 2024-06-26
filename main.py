@@ -91,7 +91,7 @@ def process_annotation(annotation):
         return ', '.join(parts[:-1] + [location])
     return annotation
 
-api_key = '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'
+api_key = os.getenv('ANTHROPIC_API_KEY')
 
 async def process_pdf_task(pdf_path: str, task_id: str):
     client = Anthropic(api_key=api_key)
