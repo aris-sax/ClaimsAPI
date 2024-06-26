@@ -1,5 +1,5 @@
 import unicodedata
-import fitz  # PyMuPDF
+from pypdf import PdfReader
 from PIL import Image
 import io
 import os
@@ -53,41 +53,24 @@ def clean_text(text):
     return ''.join(ch for ch in text if unicodedata.category(ch)[0] != 'C')
 
 def extract_text_and_images(pdf_path):
-    try:
-        doc = fitz.open(pdf_path)
-        text = []
-        images = []
+    reader = PdfReader(pdf_path)
+    number_of_pages = len(reader.pages)
 
-        for page_num, page in enumerate(doc):
-            try:
-                page_text = page.get_text()
-                cleaned_text = clean_text(page_text)
-                text.append(f"Content of page {page_num + 1}:\n{cleaned_text}\n")
-            except Exception as e:
-                print(f"Error extracting text from page {page_num + 1}: {str(e)}")
+    text = []
+    for i, page in enumerate(reader.pages):
+        page_text = page.extract_text()
+        cleaned_text = clean_text(page_text)
+        text.append(f"Content of page {i+1}:\n{cleaned_text}\n")
 
-            try:
-                image_list = page.get_images(full=True)
-                for img_index, img in enumerate(image_list):
-                    try:
-                        xref = img[0]
-                        base_image = doc.extract_image(xref)
-                        image_bytes = base_image["image"]
-                        
-                        img = Image.open(io.BytesIO(image_bytes))
-                        img_path = f"{EXTRACTED_IMAGES_FOLDER}/image_page_{page_num + 1}_{img_index + 1}.png"
-                        img.save(img_path)
-                        images.append((page_num + 1, img_index + 1, img_path))
-                    except Exception as e:
-                        print(f"Error saving image {img_index + 1} from page {page_num + 1}: {str(e)}")
-            except Exception as e:
-                print(f"Error processing images on page {page_num + 1}: {str(e)}")
+    images = []
+    for i, page in enumerate(reader.pages):
+        for j, image in enumerate(page.images):
+            img = Image.open(io.BytesIO(image.data))
+            img_path = f"{EXTRACTED_IMAGES_FOLDER}/image_page_{i+1}_{j+1}.png"
+            img.save(img_path)
+            images.append((i+1, j+1, img_path))
 
-        return "".join(text), images
-
-    except Exception as e:
-        print(f"Error processing PDF: {str(e)}")
-        return "", []
+    return "".join(text), images
 
 def encode_image(image_path):
     with open(image_path, "rb") as image_file:
@@ -115,9 +98,6 @@ async def process_pdf_task(pdf_path: str, task_id: str):
         client = Anthropic(api_key=api_key)
         text, images = extract_text_and_images(pdf_path)
         
-        if not text and not images:
-            raise Exception("Failed to extract any content from the PDF")
-        
         content = [
             {
                 "type": "text",
@@ -131,8 +111,9 @@ async def process_pdf_task(pdf_path: str, task_id: str):
                 content.extend([
                     {
                         "type": "image",
-                        "image": {
+                        "source": {
                             "type": "base64",
+                            "media_type": "image/png",
                             "data": encoded_image
                         }
                     },
@@ -270,6 +251,11 @@ async def task_status(task_id: str):
         return TaskStatus(state="FAILURE", status="Task failed", error=result["error"])
     else:
         return TaskStatus(state="UNKNOWN", status="Unknown task state")
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
     import uvicorn
