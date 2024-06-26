@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+pypdf
+Pillow
+anthropic
+python-multipart
