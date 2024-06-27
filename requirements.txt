@@ -1,7 +1,7 @@
 fastapi
-uvicorn
-pypdf
-Pillow
+pydantic
 anthropic
-python-multipart
-PyMuPDF==1.22.5
+PyMuPDF
+Pillow
+concurrent.futures
+uvicorn
