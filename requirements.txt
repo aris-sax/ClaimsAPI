@@ -3,5 +3,4 @@ pydantic
 anthropic
 PyMuPDF
 Pillow
-concurrent.futures
 uvicorn
