@@ -35,7 +35,7 @@ os.makedirs(EXTRACTED_IMAGES_FOLDER, exist_ok=True)
 task_results = {}
 
 # It's better to use an environment variable for the API key
-api_key = os.get_env("ANTHROPIC_API_KEY")
+api_key = os.getenv("ANTHROPIC_API_KEY")
 if not api_key:
     raise ValueError("ANTHROPIC_API_KEY environment variable is not set")
 
