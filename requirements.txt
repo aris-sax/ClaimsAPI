@@ -8,4 +8,4 @@ pymupdf
 Pillow
 pdfplumber
 layoutparser
-detectron2
+git+https://github.com/facebookresearch/detectron2.git
