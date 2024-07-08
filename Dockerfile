@@ -12,6 +12,8 @@ RUN apt-get update && apt-get install -y \
     libsm6 \
     libxext6 \
     libxrender-dev \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python packages
@@ -29,6 +31,10 @@ COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Copy the rest of your application
+COPY . .
+
+# Set the entrypoint
+CMD ["python3", "main.py"]
 COPY . .
 
 # Set the entrypoint
