@@ -15,12 +15,10 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python packages
-RUN pip3 install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
+RUN pip3 install --no-cache-dir torch==1.9.0+cpu torchvision==0.10.0+cpu -f https://download.pytorch.org/whl/torch_stable.html
 
-# Clone and install Detectron2
-RUN git clone https://github.com/facebookresearch/detectron2.git /detectron2_repo
-WORKDIR /detectron2_repo
-RUN pip3 install -e .
+# Install a specific version of Detectron2
+RUN pip install 'git+https://github.com/facebookresearch/detectron2.git@v0.6'
 
 # Set up the working directory
 WORKDIR /app
