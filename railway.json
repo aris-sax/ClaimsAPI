@@ -1,13 +1,11 @@
 {
   "build": {
-    "builder": "heroku/buildpacks:20",
-    "buildpacks": [
-      {
-        "url": "heroku/python"
-      }
-    ]
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "Dockerfile"
   },
   "deploy": {
-    "command": "uvicorn main:app --host 0.0.0.0 --port $PORT"
+    "startCommand": "python main.py",
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10
   }
 }
