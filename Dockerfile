@@ -16,15 +16,13 @@ RUN apt-get update && apt-get install -y \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python packages
+# Install specific versions of Python packages
 RUN pip3 install --no-cache-dir torch==1.9.0+cpu torchvision==0.10.0+cpu -f https://download.pytorch.org/whl/torch_stable.html
-
-# Install specific version of Pillow
 RUN pip3 install --no-cache-dir Pillow==8.3.2
+RUN pip3 install --no-cache-dir detectron2 -f https://dl.fbaipublicfiles.com/detectron2/wheels/cpu/torch1.9/index.html
 
-# Install pre-built Detectron2
-RUN pip3 install --no-cache-dir detectron2 -f \
-  https://dl.fbaipublicfiles.com/detectron2/wheels/cpu/torch1.9/index.html
+# Install NumPy 1.x to avoid compatibility issues
+RUN pip3 install --no-cache-dir numpy<2
 
 # Set up the working directory
 WORKDIR /app
@@ -34,10 +32,6 @@ COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Copy the rest of your application
-COPY . .
-
-# Set the entrypoint
-CMD ["python3", "main.py"]
 COPY . .
 
 # Set the entrypoint
