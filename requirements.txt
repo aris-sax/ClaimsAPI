@@ -1,6 +1,6 @@
 fastapi
 uvicorn
-numpy<2  # Ensure NumPy 1.x version is installed
+numpy==1.21.4  # Ensure NumPy 1.x version is installed
 pydantic
 anthropic
 pytesseract
