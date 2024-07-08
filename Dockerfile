@@ -22,7 +22,6 @@ RUN pip3 install --no-cache-dir Pillow==8.3.2
 RUN pip3 install --no-cache-dir detectron2 -f https://dl.fbaipublicfiles.com/detectron2/wheels/cpu/torch1.9/index.html
 
 # Install NumPy 1.x to avoid compatibility issues
-RUN pip3 install --no-cache-dir numpy<2
 
 # Set up the working directory
 WORKDIR /app
