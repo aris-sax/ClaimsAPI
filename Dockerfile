@@ -19,6 +19,9 @@ RUN apt-get update && apt-get install -y \
 # Install Python packages
 RUN pip3 install --no-cache-dir torch==1.9.0+cpu torchvision==0.10.0+cpu -f https://download.pytorch.org/whl/torch_stable.html
 
+# Install specific version of Pillow
+RUN pip3 install --no-cache-dir Pillow==8.3.2
+
 # Install pre-built Detectron2
 RUN pip3 install --no-cache-dir detectron2 -f \
   https://dl.fbaipublicfiles.com/detectron2/wheels/cpu/torch1.9/index.html
