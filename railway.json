@@ -1,0 +1,13 @@
+{
+  "build": {
+    "builder": "heroku/buildpacks:20",
+    "buildpacks": [
+      {
+        "url": "heroku/python"
+      }
+    ]
+  },
+  "deploy": {
+    "command": "uvicorn main:app --host 0.0.0.0 --port $PORT"
+  }
+}
