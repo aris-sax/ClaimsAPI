@@ -7,8 +7,6 @@ pytesseract
 pymupdf
 Pillow
 pdfplumber
-torch
-torchvision
 pytest
 layoutparser
 
