@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y \
 
 # Install specific versions of Python packages
 RUN pip3 install --no-cache-dir torch==1.9.0+cpu torchvision==0.10.0+cpu -f https://download.pytorch.org/whl/torch_stable.html
-RUN pip3 install --no-cache-dir Pillow==8.3.2
+RUN pip3 install --no-cache-dir pillow==9.5.0
 RUN pip3 install --no-cache-dir detectron2 -f https://dl.fbaipublicfiles.com/detectron2/wheels/cpu/torch1.9/index.html
 
 # Install NumPy 1.x to avoid compatibility issues
