@@ -14,7 +14,6 @@ class PageContentItem(BaseModel):
     text: str
     columnIndex: int = 0
     paragraphIndex: int = 0
-    lines: LineRange = None
     type: Union[Literal["text"], Literal["table"], Literal["figure"]]
 
 

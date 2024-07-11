@@ -50,7 +50,7 @@ async def get_review_results(task_uuid: str, background_tasks: BackgroundTasks):
     
     
 @router.post("/view_formatted_document", response_model=DocumentJsonFormat)
-async def x(task_uuid: str):
+async def get_pdf_formatted_with_metadata(task_uuid: str):
     try:
         results = claims_extraction_store.get_task_data_from_tracker(task_uuid)
         print(f"Retrieved task: {results.task_uuid}")

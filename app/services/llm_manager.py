@@ -82,157 +82,6 @@ class LLMManager:
             print(f"Exception in convert_page_as_image_to_formatted_json: {e}")
             raise Exception(f"Failed to convert image to text: {e}")
 
-    @staticmethod
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
-    def classify_text_with_claude(client: Anthropic, text: str) -> bool:
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "Imagine you are an annotator trying to identify the paragraph number for each claim in this scientific paper. "
-                        "In order to do this accurately, please classify the following text block as either part of the core scientific article "
-                        "text (true) or not (false) so that you can annotate correctly . All titles, footnotes, author names, miscellaneous other "
-                        "information about the paper should be false, only text that is a part of the paper itself and its content should be true "
-                        "this include purpose, methods, results, etc..Respond with only 'true' or 'false'.\n\n"
-                        "Text to classify:\n"
-                        f"{text}\n"
-                        "Is this part of the scientific article text?",
-                    }
-                ],
-            }
-        ]
-
-        response = (
-            client.messages.create(
-                model="claude-3-5-sonnet-20240620",
-                max_tokens=1,
-                temperature=0,
-                messages=messages,
-            )
-            .content[0]
-            .text.strip()
-            .lower()
-        )
-
-        return response == "true"
-    
-    @staticmethod
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
-    def extract_claims_with_claude(
-        client: Anthropic, full_text: str, images: List[ExtractedImage]
-    ) -> List[Dict[str, Any]]:
-        content = [
-            {
-                "type": "text",
-                "text": f"Here is the text of the academic paper:\n\n{full_text}\n\nNow I will provide the images from the paper, if any were successfully extracted.",
-            }
-        ]
-
-        for image in images:
-            try:
-                content.append({"type": "image", "image_url": f"{image.base64_data}"})
-                content.append(
-                    {
-                        "type": "text",
-                        "text": f"This is image {image.image_index} from page {image.page_number} of the paper.",
-                    }
-                )
-            except Exception as e:
-                print(
-                    f"Error processing image {image.image_index} from page {image.page_number}: {str(e)}"
-                )
-
-        content.append(
-            {
-                "type": "text",
-                "text": """You are a highly capable AI assistant tasked with extracting and organizing information from a scientific paper about a drug to then be used on the drug's website. Follow these instructions carefully:
-
-    1. CLAIM EXTRACTION:
-    - Identify all claims related to: 
-        a. Study design 
-        b. Patient outcomes and primary and secondary endpoints
-        c. Efficacy of drug in treating a specific disease compared to control. Common efficacy metrics include progression free survival (pfs), overall survival (os), objective response rate (ORR), reduction in risk of death, etc.  
-        d. Adverse events associated with drug 
-    - Try to include less information from the summaries on the first page but instead look for where the data is actually discussed in-depth in the paper
-    - Include claims ranging from phrases to full paragraphs or tables
-    - Don't include more than 3-4 claims maximum unless needed
-    - Focus on extracting claims that are similar in style and content to the following examples:
-
-    2. SOURCE IDENTIFICATION:
-    - For each claim, note:
-        - Page number (use original document footer numbers)
-        - Citation in the format: "FirstAuthor et al. Journal Name Volume(Issue):PageRange"
-
-    3. JSON OUTPUT STRUCTURE:
-    Create a JSON object with the following structure:
-    { "extractedClaims": [
-        {
-            "statement": "Exact claim text",
-            "page": "Page number as listed in the document",
-            "citation": "FirstAuthor et al. Journal Name Volume(Issue):PageRange"
-        },
-        // ... more claim objects
-        ]
-    }
-
-    4. SPECIAL CASES:
-    - Multi-page claims: Indicate full range in page field
-    - Missing info: Use null for missing fields
-
-    5. JSON FORMATTING:
-    - Ensure valid JSON format
-    - Use double quotes for strings
-    - Format JSON for readability with appropriate indentation
-
-    6. PROCESSING INSTRUCTIONS:
-    - Analyze the entire document before starting output
-    - Prioritize accuracy over speed
-    - If uncertain about a claim's relevance, include it
-    - Do not summarize or paraphrase claims; use exact text
-    - Try to combine claims that are near each and about the same topic when possible without reducing quality. 
-
-    7. SELF-CHECKING:
-    - Verify all extracted information meets specified criteria
-    - Make sure each claim is relevant to demonstrating the drug's efficacy, adverse events associated with the drug, or study design that would be relevant to a patient or physician interested in the drug. If it is not, then remove the entry from the JSON.
-    - Double-check page numbers for accuracy
-    - Ensure JSON is well-formed and valid
-    - Make sure all citations are consistent
-
-    Begin your output with the JSON object as specified in step 3. Do not include any text before or after the JSON output.""",
-            }
-        )
-
-        messages = [{"role": "user", "content": content}]
-
-        try:
-            completion = (
-                client.messages.create(
-                    model="claude-3-5-sonnet-20240620",
-                    max_tokens=2000,
-                    temperature=0,
-                    messages=messages,
-                )
-                .content[0]
-                .text
-            )
-            parsed_json = json.loads(completion)
-            if "extractedClaims" not in parsed_json:
-                print(
-                    f"Warning: 'extractedClaims' not found in parsed JSON. Raw response: {completion}"
-                )
-                return []
-            claims = parsed_json["extractedClaims"]
-            print(f"Extracted {len(claims)} claims")
-            for i, claim in enumerate(claims[:3]):
-                print(f"Claim {i + 1}: {claim['statement'][:100]}...")
-            return claims
-        except json.JSONDecodeError as e:
-            print(f"Error parsing JSON in extract_claims: {e}")
-            print(f"Raw completion: {completion}")
-            return []
-
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
     def match_claims_to_document(self, text: str, base64_image: str):
         print("Match claims in page and it's metadata.")
@@ -282,6 +131,7 @@ class LLMManager:
         return json.loads(response.choices[0].message.content).get("response", {})
 
     @staticmethod
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
     def extract_page_number_from_image(base64_image: str):
         def extract_page_number_from_image(base64_image: str):
             azure_endpoint = (
@@ -351,3 +201,151 @@ class LLMManager:
         except Exception as e:
             print("Failed to convert image to text after retries: ", e)
             return {"isImageContainText": False, "text": ""}
+
+
+    @staticmethod
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
+    async def classify_text_with_claude(client: Anthropic, text: str) -> bool:
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Imagine you are an annotator trying to identify the paragraph number for each claim in this scientific paper. "
+                        "In order to do this accurately, please classify the following text block as either part of the core scientific article "
+                        "text (true) or not (false) so that you can annotate correctly . All titles, footnotes, author names, miscellaneous other "
+                        "information about the paper should be false, only text that is a part of the paper itself and its content should be true "
+                        "this include purpose, methods, results, etc..Respond with only 'true' or 'false'.\n\n"
+                        "Text to classify:\n"
+                        f"{text}\n"
+                        "Is this part of the scientific article text?",
+                    }
+                ],
+            }
+        ]
+
+        response = (
+            client.messages.create(
+                model="claude-3-5-sonnet-20240620",
+                max_tokens=1,
+                temperature=0,
+                messages=messages,
+            )
+            .content[0]
+            .text.strip()
+            .lower()
+        )
+
+        return response == "true"
+    
+    @staticmethod
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
+    def extract_claims_with_claude(
+        client: Anthropic, full_text: str, images: List[ExtractedImage]
+    ) -> List[Dict[str, Any]]:
+        content = [
+            {
+                "type": "text",
+                "text": f"Here is the text of the academic paper:\n\n{full_text}\n\nNow I will provide the images from the paper, if any were successfully extracted.",
+            }
+        ]
+
+        for image in images:
+            try:
+                content.append({"type": "image", "image_url": f"{image.base64_data}"})
+                content.append(
+                    {
+                        "type": "text",
+                        "text": f"This is image {image.image_index} from page {image.page_number} of the paper.",
+                    }
+                )
+            except Exception as e:
+                print(
+                    f"Error processing image {image.image_index} from page {image.page_number}: {str(e)}"
+                )
+
+
+
+        content.append(
+            {
+                "type": "text",
+                "text":  "You are a highly capable AI assistant tasked with extracting and organizing information from a scientific paper about a drug to then be used on the drug's website. Follow these instructions carefully:\n"
+                        "1. CLAIM EXTRACTION:\n" 
+                        "   - Identify all claims related to:\n"
+                        "        a. Study design\n"
+                        "        b. Patient outcomes and primary and secondary endpoints\n"
+                        "        c. Efficacy of drug in treating a specific disease compared to control. Common efficacy metrics include progression free survival (pfs), overall survival (os), objective response rate (ORR), reduction in risk of death, etc.\n"
+                        "        d. Adverse events associated with drug\n"
+                        "   - Try to include less information from the summaries on the first page but instead look for where the data is actually discussed in-depth in the paper\n"
+                        "   - Include claims ranging from phrases to full paragraphs or tables\n"
+                        "   - Don't include more than 3-4 claims maximum unless needed\n"
+                        "   - Focus on extracting claims that are similar in style and content to the following examples:\n"
+                        "2. SOURCE IDENTIFICATION:\n"
+                        "   - For each claim, note:\n"
+                        "       - Page number (use original document footer numbers)\n"
+                        "       - Citation in the format: \"FirstAuthor et al. Journal Name Volume(Issue):PageRange\"\n"
+                        "3. JSON OUTPUT STRUCTURE:\n"
+                        "   Create a JSON object with the following structure:\n"
+                        "   {\n"
+                        "     \"extractedClaims\": [\n"
+                        "         {\n"
+                        "             \"statement\": \"Exact claim text\",\n"
+                        "             \"page\": \"Page number as listed in the document\",\n"
+                        "             \"citation\": \"FirstAuthor et al. Journal Name Volume(Issue):PageRange\"\n"
+                        "         },\n"
+                        "         // ... more claim objects\n"
+                        "     ]\n"
+                        "   }\n"
+                        "4. SPECIAL CASES:\n"
+                        "   - Multi-page claims: Indicate full range in page field\n"
+                        "   - Missing info: Use null for missing fields\n"
+                        "5. JSON FORMATTING:\n"
+                        "   - Ensure valid JSON format\n"
+                        "   - Use double quotes for strings\n"
+                        "   - Format JSON for readability with appropriate indentation\n"
+                        "6. PROCESSING INSTRUCTIONS:\n"
+                        "   - Analyze the entire document before starting output\n"
+                        "   - Prioritize accuracy over speed\n"
+                        "   - If uncertain about a claim's relevance, include it\n"
+                        "   - Do not summarize or paraphrase claims; use exact text\n"
+                        "   - Try to combine claims that are near each and about the same topic when possible without reducing quality.\n"
+                        "7. SELF-CHECKING:\n"
+                        "   - Verify all extracted information meets specified criteria\n"
+                        "   - Make sure each claim is relevant to demonstrating the drug's efficacy, adverse events associated with the drug, or study design that would be relevant to a patient or physician interested in the drug. If it is not, then remove the entry from the JSON.\n"
+                        "   - Double-check page numbers for accuracy\n"
+                        "   - Ensure JSON is well-formed and valid\n"
+                        "   - Make sure all citations are consistent\n"
+                        "Begin your output with the JSON object as specified in step 3. Do not include any text before or after the JSON output.",
+            }
+        )
+
+        messages = [{"role": "user", "content": content}]
+
+        try:
+            completion = (
+                client.messages.create(
+                    model="claude-3-5-sonnet-20240620",
+                    max_tokens=2000,
+                    temperature=0,
+                    messages=messages,
+                )
+                .content[0]
+                .text
+            )
+            parsed_json = json.loads(completion)
+            if "extractedClaims" not in parsed_json:
+                print(
+                    f"Warning: 'extractedClaims' not found in parsed JSON. Raw response: {completion}"
+                )
+                return []
+            claims = parsed_json["extractedClaims"]
+            print(f"Extracted {len(claims)} claims")
+            for i, claim in enumerate(claims[:3]):
+                print(f"Claim {i + 1}: {claim['statement'][:100]}...")
+            return claims
+        except json.JSONDecodeError as e:
+            print(f"Error parsing JSON in extract_claims: {e}")
+            print(f"Raw completion: {completion}")
+            return []
+

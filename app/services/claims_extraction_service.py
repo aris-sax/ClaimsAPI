@@ -1,12 +1,15 @@
-from typing import List
+from typing import List, Optional
 from anthropic import Anthropic
 from fastapi import UploadFile
 
 from app.pydantic_schemas.claims_extraction_task import (
+    Annotation,
     ClaimResult,
     ClaimsExtractionTask,
     ExtractedImage,
+    LineRange,
     PDFExtractionResult,
+    PageContentItem,
     PageJsonFormat,
     TaskDocumentVariants,
     DocumentJsonFormat,
@@ -48,11 +51,12 @@ class ClaimsExtractionService:
             print("Map Claims")
             for claim in claims:
                 # Map the claims by search match to the JSON structure
-                #TODO: WIP
-                # matched_claims = self.fuzzy_match_claims_to_blocks(claims, text_blocks)
-                self.task.results.append(ClaimResult(claim=claim["statement"]))
-
-            
+                claim_annotation_details: Annotation = self.match_claims_to_blocks(search_text=claim["statement"], page_range=[i, min(i + chunk_size, total_pages)])
+                if claim_annotation_details:
+                    start_line, end_line = self.extract_line_numbers_in_paragraph(claim["statement"], claim_annotation_details.annotationText) or (0, 0)
+                    claim_annotation_details.linesInParagraph = LineRange(start=start_line, end=end_line)
+                    self.task.results.append(ClaimResult(claim=claim["statement"], annotationDetails=claim_annotation_details))
+                    
         self.task.task_status = TaskStatus.COMPLETE
 
 
@@ -111,7 +115,7 @@ class ClaimsExtractionService:
         return full_text, images
 
 
-    def fuzzy_match_claims_to_blocks(claims: List[str], text_blocks: List[PageJsonFormat]) -> List[PageJsonFormat]:
+    def fuzzy_match_claims_to_blocks(self, claims: List[str], text_blocks: List[PageJsonFormat]) -> List[PageJsonFormat]:
         matched_claims = []
         
         for claim_index, claim in enumerate(claims):
@@ -161,4 +165,78 @@ class ClaimsExtractionService:
 
         return matched_claims
 
+
+    def match_claims_to_blocks(self, search_text: str, page_range: Optional[List[int]] = None) -> Optional[Annotation]:
+        def get_similarity(a: str, b: str) -> float:
+            return SequenceMatcher(None, a.lower(), b.lower()).ratio()
+
+        def process_content(content: PageContentItem, page: PageJsonFormat) -> Optional[Annotation]:
+            similarity = get_similarity(content.text, search_text)
+            if similarity > process_content.highest_similarity:
+                process_content.highest_similarity = similarity
+                return Annotation(
+                    annotationText=content.text,
+                    documentName=self.task.task_document.text_file_with_metadata.documentName,
+                    pageNumber=page.pageNumber,
+                    internalPageNumber=page.internalPageNumber,
+                    columnNumber=content.columnIndex,  
+                    paragraphNumber=content.paragraphIndex,  
+                    formattedInformation=f"Similarity: {similarity:.2f}"
+                )
+            return None
+
+        process_content.highest_similarity = 0
+        best_match = None
+
+        pages = self.task.task_document.text_file_with_metadata.pages
+        if page_range:
+            pages = pages[page_range[0]:page_range[1]]
+
+        for page in pages:
+            for content in page.content:
+                current_match = process_content(content, page)
+                if current_match:
+                    best_match = current_match
+
+        return best_match
+
+
+    @staticmethod
+    def extract_line_numbers_in_paragraph(claim: str, annotation_text: str):
+        
+        def normalize_text(text):
+            return ' '.join(text.split())
+        
+        def get_line_number(position, text):
+            return text[:position].count('\n')
+        
+        def find_phrase_position(phrase, text, from_start=True):
+            normalized_phrase = normalize_text(phrase)
+            normalized_text = normalize_text(text)
+            find_func = normalized_text.find if from_start else normalized_text.rfind
+            
+            position = find_func(normalized_phrase)
+            if position != -1:
+                return position + (0 if from_start else len(normalized_phrase))
+            
+            # If exact match not found, try partial matches
+            words = normalized_phrase.split()
+            for i in range(len(words), 0, -1):
+                partial_phrase = ' '.join(words[:i] if from_start else words[-i:])
+                position = find_func(partial_phrase)
+                if position != -1:
+                    return position + (0 if from_start else len(partial_phrase))
+            
+            return -1
+
+        start_pos = find_phrase_position(claim, annotation_text, from_start=True)
+        end_pos = find_phrase_position(claim, annotation_text, from_start=False)
+
+        if start_pos == -1 or end_pos == -1:
+            return None, None
+
+        start_line = get_line_number(start_pos, annotation_text)
+        end_line = get_line_number(end_pos, annotation_text)
+
+        return start_line, end_line
 

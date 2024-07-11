@@ -14,3 +14,4 @@ services:
       - "8000:8000"  # Adjust this if your app uses a different port
     command: ["python3", "main.py"]
 
+

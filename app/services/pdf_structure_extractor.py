@@ -24,6 +24,7 @@ class PDFStructureExtractor:
     """
     A class to extract structured text blocks from a PDF document.
     """
+    _model_instance = None
 
     def __init__(self, task: ClaimsExtractionTask):
         self.task = task
@@ -31,6 +32,16 @@ class PDFStructureExtractor:
         self.llm_manager = LLMManager()
         self.document_text_blocks = []
         self.logger = logging.getLogger(__name__)
+        
+    @classmethod
+    def _get_layout_model(cls):
+        if cls._model_instance is None:
+            cls._model_instance = lp.Detectron2LayoutModel(
+                'lp://PubLayNet/mask_rcnn_X_101_32x8d_FPN_3x/config',
+                extra_config=["MODEL.ROI_HEADS.SCORE_THRESH_TEST", 0.5]
+            )
+        return cls._model_instance
+
 
 
     def format_clinical_document(self):
@@ -42,18 +53,60 @@ class PDFStructureExtractor:
             self.task.task_document.text_file_with_metadata = DocumentJsonFormat(documentName=document_name, pages=[])
 
             print("Processing pages...")
-            self._process_pages(doc, numbering_start_page, first_internal_number)
+            self.process_pages_async_cover(doc, numbering_start_page, first_internal_number)
 
         return self.task.task_document.text_file_with_metadata
 
 
+
+
+    def process_pages_async_cover(self, doc, numbering_start_page, first_internal_number):
+        asyncio.run(self._process_pages_async(doc, numbering_start_page, first_internal_number))
+
+    async def _process_pages_async(self, doc, numbering_start_page, first_internal_number):
+        tasks = [
+            self._process_page_data_async(doc, page_num, numbering_start_page, first_internal_number)
+            for page_num in range(len(doc))
+        ]
+        pages_formatted = await asyncio.gather(*tasks)
+        self.task.task_document.text_file_with_metadata.pages.extend(pages_formatted)
+
+    async def _process_pages_async(self, doc, numbering_start_page, first_internal_number):
+        tasks = [
+            self._process_page_data_async(doc, page_num, numbering_start_page, first_internal_number)
+            for page_num in range(len(doc))
+        ]
+        pages_formatted = await asyncio.gather(*tasks)
+        self.task.task_document.text_file_with_metadata.pages.extend(pages_formatted)
+
+
+    async def _process_page_data_async(self, doc, page_num, numbering_start_page, first_internal_number):
+        current_page_internal_page_number = self._calculate_internal_page_number(page_num, numbering_start_page, first_internal_number)
+
+        page = doc.load_page(page_num)
+        model = self._get_layout_model()
+        page_as_blocks = await self.process_page(page, page_num, model, self.llm_manager_anthropic)
+
+        page_blocks_formatted = [self._format_block(block) for block in page_as_blocks]
+
+        return PageJsonFormat(
+            pageNumber=page_num + 1,
+            internalPageNumber=current_page_internal_page_number,
+            content=page_blocks_formatted,
+        )
+
+
+
+
     def _process_pages(self, doc, numbering_start_page, first_internal_number):
-        with ThreadPoolExecutor(max_workers=2) as executor:
+        MAX_WORKERS = 3
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
             futures = [executor.submit(self._process_page_data, doc, page_num, numbering_start_page, first_internal_number)
                        for page_num in range(len(doc))]
             for future in as_completed(futures):
                 page_formatted = future.result()
                 self.task.task_document.text_file_with_metadata.pages.append(page_formatted)
+
 
     def _process_page_data(self, doc, page_num, numbering_start_page, first_internal_number):
         current_page_internal_page_number = self._calculate_internal_page_number(page_num, numbering_start_page, first_internal_number)
@@ -76,11 +129,11 @@ class PDFStructureExtractor:
         return first_internal_number + (page_num - numbering_start_page)
 
 
-    def _get_layout_model(self):
-        return lp.Detectron2LayoutModel(
-            'lp://PubLayNet/mask_rcnn_X_101_32x8d_FPN_3x/config',
-            extra_config=["MODEL.ROI_HEADS.SCORE_THRESH_TEST", 0.5]
-        )
+    # def _get_layout_model(self):
+    #     return lp.Detectron2LayoutModel(
+    #         'lp://PubLayNet/mask_rcnn_X_101_32x8d_FPN_3x/config',
+    #         extra_config=["MODEL.ROI_HEADS.SCORE_THRESH_TEST", 0.5]
+    #     )
 
 
     def _format_block(self, block):
@@ -173,8 +226,8 @@ class PDFStructureExtractor:
 
         page_texts = self.extract_page_texts(page, pix, filtered_blocks)
         deduplicated_texts = self.deduplicate_texts(page_texts)
-
-        text_blocks = self.append_text_blocks(deduplicated_texts, client)
+        text_blocks = await self.append_text_blocks(deduplicated_texts, client)
+        print(f"Page {page_num + 1} processed successfully. Text blocks extracted: {len(text_blocks)}")
         return text_blocks
 
 
@@ -190,7 +243,7 @@ class PDFStructureExtractor:
             loop.close()
 
 
-    def append_text_blocks(self, deduplicated_texts: List[Dict[str, Any]], client: Anthropic) -> List[Dict[str, Any]]:
+    async def append_text_blocks(self, deduplicated_texts: List[Dict[str, Any]], client: Anthropic) -> List[Dict[str, Any]]:
         text_blocks = []
         columns = {1: [], 2: []}
         for text in deduplicated_texts:
@@ -202,7 +255,7 @@ class PDFStructureExtractor:
         for column, texts in enumerate(columns.values(), 1):
             paragraph_number = 1
             for text in texts:
-                if LLMManager.classify_text_with_claude(client, text['text']):
+                if await LLMManager.classify_text_with_claude(client, text['text']):
                     text_blocks.append({
                         "column": column,
                         "paragraph": paragraph_number,
