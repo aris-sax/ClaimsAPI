@@ -28,8 +28,11 @@ import fitz  # PyMuPDF
 from io import BytesIO
 from PIL import Image
 from difflib import SequenceMatcher
+
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+
+# from sentence_transformers import SentenceTransformer, util
 
 
 class ClaimsExtractionService:
@@ -57,7 +60,7 @@ class ClaimsExtractionService:
                 if claim_annotation_details is not None and self.are_paragraphs_similar(claim["statement"], claim_annotation_details.annotationText):
                     start_line, end_line = self.extract_line_numbers_in_paragraph(claim["statement"], claim_annotation_details.annotationText)
                     claim_annotation_details.linesInParagraph = LineRange(start=start_line, end=end_line)
-                    claim_annotation_details.formattedInformation += f"/ lns {claim_annotation_details.linesInParagraph.start}-{claim_annotation_details.linesInParagraph.end}"
+                    claim_annotation_details.formattedInformation += f"/lns {claim_annotation_details.linesInParagraph.start}-{claim_annotation_details.linesInParagraph.end}"
                     self.task.results.append(ClaimResult(claim=claim["statement"], annotationDetails=claim_annotation_details))
                     
         self.task.task_status = TaskStatus.COMPLETE
@@ -134,7 +137,7 @@ class ClaimsExtractionService:
                     internalPageNumber=page_to_process.internalPageNumber,
                     columnNumber=content_to_process.columnIndex,  
                     paragraphNumber=content_to_process.paragraphIndex,  
-                    formattedInformation=f"{document_name}/p{page_to_process.internalPageNumber}/ col{content_to_process.columnIndex}/¶{content_to_process.paragraphIndex}",
+                    formattedInformation=f"{document_name}/p{page_to_process.internalPageNumber}/col{content_to_process.columnIndex}/¶{content_to_process.paragraphIndex}",
                 )
             return None
 
@@ -162,6 +165,14 @@ class ClaimsExtractionService:
 
         def get_line_number(position, text):
             return text[:position].count('\n') +1
+        
+        # TODO: Remove this edge case function in the future
+        def handle_edge_case(claim, annotation_text):
+            if len(normalize_text(claim)) > len(normalize_text(annotation_text)):
+                total_lines = annotation_text.count('\n') + 1
+                return 1, total_lines
+            return None
+
 
         def find_phrase_position(phrase, text, from_start=True):
             normalized_phrase = normalize_text(phrase)
@@ -181,6 +192,11 @@ class ClaimsExtractionService:
                     return position + (0 if from_start else len(partial_phrase))
 
             return -1
+
+
+        edge_case_result = handle_edge_case(claim, annotation_text)
+        if edge_case_result:
+            return edge_case_result
 
         start_pos = find_phrase_position(claim, annotation_text, from_start=True)
         end_pos = find_phrase_position(claim, annotation_text, from_start=False)
@@ -210,3 +226,11 @@ class ClaimsExtractionService:
         similarity_score = cosine_sim[0, 1]
         
         return similarity_score >= threshold
+
+    # @staticmethod
+    # def are_sentences_similar(sentence1: str, sentence2: str, threshold: float = 0.5) -> bool:
+    #     model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
+    #     embeddings = model.encode([sentence1, sentence2])
+    #     cosine_sim = util.pytorch_cos_sim(embeddings[0], embeddings[1])
+        
+    #     return cosine_sim.item() >= threshold
