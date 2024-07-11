@@ -22,7 +22,7 @@ from app.services.universal_file_processor import (
     ImageTextExtractor,
 )
 from app.utils.enums import TaskStatus
-from app.utils.utils import generate_uuid, preprocess_text
+from app.utils.utils import generate_uuid
 from app.config import settings
 import fitz  # PyMuPDF
 from io import BytesIO
@@ -55,6 +55,7 @@ class ClaimsExtractionService:
                 if claim_annotation_details:
                     start_line, end_line = self.extract_line_numbers_in_paragraph(claim["statement"], claim_annotation_details.annotationText) or (0, 0)
                     claim_annotation_details.linesInParagraph = LineRange(start=start_line, end=end_line)
+                    claim_annotation_details.formattedInformation += f"/ lns {claim_annotation_details.linesInParagraph.start}-{claim_annotation_details.linesInParagraph.end}"
                     self.task.results.append(ClaimResult(claim=claim["statement"], annotationDetails=claim_annotation_details))
                     
         self.task.task_status = TaskStatus.COMPLETE
@@ -112,76 +113,26 @@ class ClaimsExtractionService:
         except Exception as e:
             print(f"Error extracting full text and images: {str(e)}")
 
-        return full_text, images
-
-
-    def fuzzy_match_claims_to_blocks(self, claims: List[str], text_blocks: List[PageJsonFormat]) -> List[PageJsonFormat]:
-        matched_claims = []
-        
-        for claim_index, claim in enumerate(claims):
-            print(f"\nMatching claim {claim_index + 1}:")
-            print(f"Claim: {claim[:100]}...")
-            
-            best_match = None
-            best_ratio = 0
-            best_substring_ratio = 0
-            preprocessed_claim = preprocess_text(claim)
-            
-            for block_index, block in enumerate(text_blocks):
-                preprocessed_block = preprocess_text(block['text'])
-                
-                if preprocessed_claim in preprocessed_block:
-                    substring_ratio = len(preprocessed_claim) / len(preprocessed_block)
-                    if substring_ratio > best_substring_ratio:
-                        best_substring_ratio = substring_ratio
-                        best_match = block
-                
-                if best_substring_ratio == 0:
-                    ratio = SequenceMatcher(None, preprocessed_claim, preprocessed_block).ratio()
-                    if ratio > best_ratio:
-                        best_ratio = ratio
-                        best_match = block
-            
-            if best_match:
-                if best_substring_ratio > 0:
-                    print(f"Matched as substring (ratio: {best_substring_ratio:.2f})")
-                else:
-                    print(f"Matched with fuzzy ratio: {best_ratio:.2f}")
-                
-                matched_claim = claim.copy()
-                matched_claim.update({
-                    'column': best_match['column'],
-                    'paragraph': best_match['paragraph'],
-                    'matched_text': best_match['text']
-                })
-                matched_claims.append(matched_claim)
-                print("Matched with block:")
-                print(f"  Column {best_match['column']}, Paragraph {best_match['paragraph']}")
-                print(f"  {best_match['text'][:200]}...")
-            else:
-                print(f"Failed to match. Best substring ratio: {best_substring_ratio:.2f}, Best fuzzy ratio: {best_ratio:.2f}")
-        
-        print(f"\nTotal matched claims: {len(matched_claims)}")
-
-        return matched_claims
+        return PDFExtractionResult(full_text=full_text, images=images)
 
 
     def match_claims_to_blocks(self, search_text: str, page_range: Optional[List[int]] = None) -> Optional[Annotation]:
         def get_similarity(a: str, b: str) -> float:
             return SequenceMatcher(None, a.lower(), b.lower()).ratio()
 
-        def process_content(content: PageContentItem, page: PageJsonFormat) -> Optional[Annotation]:
-            similarity = get_similarity(content.text, search_text)
+        def process_content(content_to_process: PageContentItem, page_to_process: PageJsonFormat) -> Optional[Annotation]:
+            similarity = get_similarity(content_to_process.text, search_text)
+            document_name = self.task.task_document.text_file_with_metadata.documentName
             if similarity > process_content.highest_similarity:
                 process_content.highest_similarity = similarity
                 return Annotation(
-                    annotationText=content.text,
-                    documentName=self.task.task_document.text_file_with_metadata.documentName,
-                    pageNumber=page.pageNumber,
-                    internalPageNumber=page.internalPageNumber,
-                    columnNumber=content.columnIndex,  
-                    paragraphNumber=content.paragraphIndex,  
-                    formattedInformation=f"Similarity: {similarity:.2f}"
+                    annotationText=content_to_process.text,
+                    documentName=document_name,
+                    pageNumber=page_to_process.pageNumber,
+                    internalPageNumber=page_to_process.internalPageNumber,
+                    columnNumber=content_to_process.columnIndex,  
+                    paragraphNumber=content_to_process.paragraphIndex,  
+                    formattedInformation=f"{document_name}/p{page_to_process.internalPageNumber}/ col{content_to_process.columnIndex}/¶{content_to_process.paragraphIndex}",
                 )
             return None
 
@@ -203,22 +154,22 @@ class ClaimsExtractionService:
 
     @staticmethod
     def extract_line_numbers_in_paragraph(claim: str, annotation_text: str):
-        
+
         def normalize_text(text):
             return ' '.join(text.split())
-        
+
         def get_line_number(position, text):
             return text[:position].count('\n')
-        
+
         def find_phrase_position(phrase, text, from_start=True):
             normalized_phrase = normalize_text(phrase)
             normalized_text = normalize_text(text)
             find_func = normalized_text.find if from_start else normalized_text.rfind
-            
+
             position = find_func(normalized_phrase)
             if position != -1:
                 return position + (0 if from_start else len(normalized_phrase))
-            
+
             # If exact match not found, try partial matches
             words = normalized_phrase.split()
             for i in range(len(words), 0, -1):
@@ -226,7 +177,7 @@ class ClaimsExtractionService:
                 position = find_func(partial_phrase)
                 if position != -1:
                     return position + (0 if from_start else len(partial_phrase))
-            
+
             return -1
 
         start_pos = find_phrase_position(claim, annotation_text, from_start=True)

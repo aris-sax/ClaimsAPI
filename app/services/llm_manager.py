@@ -346,6 +346,5 @@ class LLMManager:
             return claims
         except json.JSONDecodeError as e:
             print(f"Error parsing JSON in extract_claims: {e}")
-            print(f"Raw completion: {completion}")
             return []
 

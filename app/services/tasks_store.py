@@ -8,6 +8,9 @@ from app.utils.enums import TaskStatus
 
 
 class ClaimsExtractionStore:
+    def __init__(self):
+        pass
+
     @staticmethod
     def get_task_data_from_tracker(task_uuid: str):
         task_data = settings.CLAIMS_CHECKER_RESPONSES_TRACKER.get(task_uuid)

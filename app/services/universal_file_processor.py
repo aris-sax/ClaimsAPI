@@ -24,8 +24,6 @@ class UniversalFileProcessor:
         self.extractors = {
             FileType.PDF: PDFTextExtractor(),
             FileType.IMAGE: ImageTextExtractor(),
-            FileType.DOCX: DocxTextExtractor(),
-            FileType.TXT: TxtTextExtractor()
         }
 
     def convert_file_to_text(self, file: BinaryIO, file_type: FileType) -> str:
@@ -144,20 +142,6 @@ class PDFTextExtractor:
         return f"data:image/{image_format.lower()};base64," + img_base64
 
 
-class DocxTextExtractor:
-    @staticmethod
-    def extract_text(file: BinaryIO) -> str:
-        doc = docx.Document(file)
-        return "\n".join([para.text for para in doc.paragraphs])
-
-
-class TxtTextExtractor:
-    @staticmethod
-    def extract_text(file: BinaryIO) -> str:
-        file.seek(0)
-        return file.read().decode('utf-8')
-
-
 class ImageTextExtractor:
     def __init__(self):
         self.llm_manager = LLMManager()
@@ -184,6 +168,9 @@ class ImageTextExtractor:
 
 
 class FileProcessingService:
+    def __init__(self):
+        pass
+
     @staticmethod
     def extract_file_content(file: UploadFile) -> CustomFilePayload:
         return CustomFilePayload(

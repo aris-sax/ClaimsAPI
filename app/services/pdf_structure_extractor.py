@@ -71,15 +71,6 @@ class PDFStructureExtractor:
         pages_formatted = await asyncio.gather(*tasks)
         self.task.task_document.text_file_with_metadata.pages.extend(pages_formatted)
 
-    async def _process_pages_async(self, doc, numbering_start_page, first_internal_number):
-        tasks = [
-            self._process_page_data_async(doc, page_num, numbering_start_page, first_internal_number)
-            for page_num in range(len(doc))
-        ]
-        pages_formatted = await asyncio.gather(*tasks)
-        self.task.task_document.text_file_with_metadata.pages.extend(pages_formatted)
-
-
     async def _process_page_data_async(self, doc, page_num, numbering_start_page, first_internal_number):
         current_page_internal_page_number = self._calculate_internal_page_number(page_num, numbering_start_page, first_internal_number)
 
@@ -123,27 +114,21 @@ class PDFStructureExtractor:
             content=page_blocks_formatted,
         )
 
-    def _calculate_internal_page_number(self, page_num, numbering_start_page, first_internal_number):
+    @staticmethod
+    def _calculate_internal_page_number(page_num, numbering_start_page, first_internal_number):
         if page_num < numbering_start_page:
             return 0
         return first_internal_number + (page_num - numbering_start_page)
 
 
-    # def _get_layout_model(self):
-    #     return lp.Detectron2LayoutModel(
-    #         'lp://PubLayNet/mask_rcnn_X_101_32x8d_FPN_3x/config',
-    #         extra_config=["MODEL.ROI_HEADS.SCORE_THRESH_TEST", 0.5]
-    #     )
-
-
-    def _format_block(self, block):
+    @staticmethod
+    def _format_block(block):
         return PageContentItem(
             text=block["text"],
             paragraphIndex=block["paragraph"],
             columnIndex=block["column"],
             type="text"
         )
-
 
     def _extract_internal_page_numbering(
         self, pdf_document: fitz.Document, max_pages_to_check: int = 5
@@ -174,39 +159,6 @@ class PDFStructureExtractor:
         return 0, 0
 
 
-    async def extract_text_blocks(self, client: Anthropic) -> List[Dict[str, Any]]:
-        """
-        Extract text blocks from the specified range of pages in the PDF document.
-
-        Args:
-            client (Anthropic): The client to use for text classification.
-            start_page (int): The starting page number.
-            end_page (int): The ending page number.
-
-        Returns:
-            List[Dict[str, Any]]: A list of extracted text blocks.
-        """
-        text_blocks: List = []
-
-        try:
-            self.logger.info(f"Loading PDF: {self.task.task_document.raw_file.filename}")
-            doc = fitz.open(stream=self.task.task_document.raw_file.content, filetype="pdf")
-            print(f"PDF opened successfully. Total pages: {len(doc)}")
-            self.logger.info(f"PDF opened successfully. Total pages: {len(doc)}")
-            model = lp.Detectron2LayoutModel('lp://PubLayNet/mask_rcnn_X_101_32x8d_FPN_3x/config',
-                                             extra_config=["MODEL.ROI_HEADS.SCORE_THRESH_TEST", 0.5])
-
-            tasks = [self.process_page(doc[page_num], page_num, model, client, text_blocks) for page_num in range(len(doc))]
-            await asyncio.gather(*tasks)
-            
-            for block in text_blocks:
-                self.task.task_document.text_file_with_metadata
-            
-
-        except Exception as e:
-            self.logger.error(f"Error processing PDF: {e}")
-            
-        return text_blocks
 
 
     async def process_page(self, page: Page, page_num: int, model: any, client: Anthropic) -> List[Dict[str, Any]]:
