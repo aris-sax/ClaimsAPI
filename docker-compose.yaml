@@ -1,0 +1,16 @@
+version: '3.9'
+
+services:
+  app:
+    build: .
+    container_name: claims-api
+    env_file:
+      - .env
+    volumes:
+      - ./uploads:/app/uploads
+      - ./extracted_images:/app/extracted_images
+      - .:/app  
+    ports:
+      - "8000:8000"  # Adjust this if your app uses a different port
+    command: ["python3", "main.py"]
+
