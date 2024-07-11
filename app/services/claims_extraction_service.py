@@ -53,7 +53,7 @@ class ClaimsExtractionService:
                 # Map the claims by search match to the JSON structure
                 claim_annotation_details: Annotation = self.match_claims_to_blocks(search_text=claim["statement"], page_range=[i, min(i + chunk_size, total_pages)])
                 if claim_annotation_details:
-                    start_line, end_line = self.extract_line_numbers_in_paragraph(claim["statement"], claim_annotation_details.annotationText) or (0, 0)
+                    start_line, end_line = self.extract_line_numbers_in_paragraph(claim["statement"], claim_annotation_details.annotationText)
                     claim_annotation_details.linesInParagraph = LineRange(start=start_line, end=end_line)
                     claim_annotation_details.formattedInformation += f"/ lns {claim_annotation_details.linesInParagraph.start}-{claim_annotation_details.linesInParagraph.end}"
                     self.task.results.append(ClaimResult(claim=claim["statement"], annotationDetails=claim_annotation_details))
@@ -159,7 +159,7 @@ class ClaimsExtractionService:
             return ' '.join(text.split())
 
         def get_line_number(position, text):
-            return text[:position].count('\n')
+            return text[:position].count('\n') +1
 
         def find_phrase_position(phrase, text, from_start=True):
             normalized_phrase = normalize_text(phrase)
@@ -184,7 +184,7 @@ class ClaimsExtractionService:
         end_pos = find_phrase_position(claim, annotation_text, from_start=False)
 
         if start_pos == -1 or end_pos == -1:
-            return None, None
+            return -1, -1
 
         start_line = get_line_number(start_pos, annotation_text)
         end_line = get_line_number(end_pos, annotation_text)
