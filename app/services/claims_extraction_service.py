@@ -45,9 +45,9 @@ class ClaimsExtractionService:
         chunk_size = 3
         for i in range(0, total_pages, chunk_size):
             print("Extracting Text and Images")
-            full_text, images = self.extract_full_text_and_images(i, min(i + chunk_size, total_pages))
+            pdf_extraction_results = self.extract_full_text_and_images(i, min(i + chunk_size, total_pages))
             print("Extracting Claims")
-            claims = LLMManager.extract_claims_with_claude(self.anthropic_client, full_text, images)
+            claims = LLMManager.extract_claims_with_claude(self.anthropic_client, pdf_extraction_results.full_text, pdf_extraction_results.images)
             print("Map Claims")
             for claim in claims:
                 # Map the claims by search match to the JSON structure
