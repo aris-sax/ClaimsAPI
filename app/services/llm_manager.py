@@ -253,19 +253,19 @@ class LLMManager:
 
         for image in images:
             try:
-                content.append({"type": "image", "image_url": f"{image.base64_data}"})
-                content.append(
-                    {
-                        "type": "text",
-                        "text": f"This is image {image.image_index} from page {image.page_number} of the paper.",
-                    }
-                )
+                content.append({"type": "text","text": f"Image {image.image_index} from page {image.page_number}:"})
+                content.append({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": f"image/{image.image_format}",
+                        "data": image.base64_data,
+                    },
+                })
             except Exception as e:
                 print(
                     f"Error processing image {image.image_index} from page {image.page_number}: {str(e)}"
                 )
-
-
 
         content.append(
             {
@@ -323,17 +323,13 @@ class LLMManager:
         messages = [{"role": "user", "content": content}]
 
         try:
-            completion = (
-                client.messages.create(
+            completion = client.messages.create(
                     model="claude-3-5-sonnet-20240620",
                     max_tokens=2000,
                     temperature=0,
                     messages=messages,
                 )
-                .content[0]
-                .text
-            )
-            parsed_json = json.loads(completion)
+            parsed_json = json.loads(completion.content[0].text)
             if "extractedClaims" not in parsed_json:
                 print(
                     f"Warning: 'extractedClaims' not found in parsed JSON. Raw response: {completion}"

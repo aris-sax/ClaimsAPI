@@ -17,10 +17,7 @@ from app.pydantic_schemas.claims_extraction_task import (
 from app.services.llm_manager import LLMManager
 from app.services.pdf_structure_extractor import PDFStructureExtractor
 from app.services.tasks_store import ClaimsExtractionStore
-from app.services.universal_file_processor import (
-    FileProcessingService,
-    ImageTextExtractor,
-)
+from app.services.universal_file_processor import FileProcessingService
 from app.utils.enums import TaskStatus
 from app.utils.utils import generate_uuid
 from app.config import settings
@@ -28,6 +25,7 @@ import fitz  # PyMuPDF
 from io import BytesIO
 from PIL import Image
 from difflib import SequenceMatcher
+import base64
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -52,7 +50,14 @@ class ClaimsExtractionService:
             print("Extracting Text and Images")
             pdf_extraction_results = self.extract_full_text_and_images(i, min(i + chunk_size, total_pages))
             print("Extracting Claims")
-            claims = LLMManager.extract_claims_with_claude(self.anthropic_client, pdf_extraction_results.full_text, pdf_extraction_results.images)
+            
+            try:
+                claims = LLMManager.extract_claims_with_claude(self.anthropic_client, pdf_extraction_results.full_text, pdf_extraction_results.images)
+            except Exception as e:
+                claims = []
+                print(f"Error in the claims extraction in this group of pages {i, min(i + chunk_size, total_pages)}")
+                print("The error is: ",e)
+                
             print("Map Claims")
             for claim in claims:
                 # Map the claims by search match to the JSON structure
@@ -107,13 +112,14 @@ class ClaimsExtractionService:
                     base_image = doc.extract_image(xref)
                     image_bytes = base_image["image"]
 
-                    # Convert image bytes to PIL Image
-                    pil_image = Image.open(BytesIO(image_bytes))
+                    # Convert image bytes to PIL Image - Convert image to base64
+                    pil_image = Image.open(BytesIO(image_bytes)) 
+                    buffered = BytesIO()
+                    image_format = pil_image.format if pil_image.format else "PNG"
+                    pil_image.save(buffered, format=image_format)
+                    image_base64 = base64.b64encode(buffered.getvalue()).decode()
 
-                    # Convert image to base64
-                    base64_image = ImageTextExtractor.image_to_base64(pil_image)
-
-                    images.append(ExtractedImage(page_number=page_num + 1, image_index=img_index + 1, base64_data=base64_image))
+                    images.append(ExtractedImage(page_number=page_num + 1, image_index=img_index + 1, base64_data=image_base64, image_format=image_format.lower()))
 
         except Exception as e:
             print(f"Error extracting full text and images: {str(e)}")

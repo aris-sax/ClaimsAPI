@@ -75,6 +75,7 @@ class ExtractedImage(BaseModel):
     page_number: int
     image_index: int
     base64_data: str
+    image_format: str
 
 class PDFExtractionResult(BaseModel):
     full_text: str
