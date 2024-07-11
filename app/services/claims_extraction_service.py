@@ -28,6 +28,8 @@ import fitz  # PyMuPDF
 from io import BytesIO
 from PIL import Image
 from difflib import SequenceMatcher
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
 
 class ClaimsExtractionService:
@@ -52,7 +54,7 @@ class ClaimsExtractionService:
             for claim in claims:
                 # Map the claims by search match to the JSON structure
                 claim_annotation_details: Annotation = self.match_claims_to_blocks(search_text=claim["statement"], page_range=[i, min(i + chunk_size, total_pages)])
-                if claim_annotation_details:
+                if claim_annotation_details is not None and self.are_paragraphs_similar(claim["statement"], claim_annotation_details.annotationText):
                     start_line, end_line = self.extract_line_numbers_in_paragraph(claim["statement"], claim_annotation_details.annotationText)
                     claim_annotation_details.linesInParagraph = LineRange(start=start_line, end=end_line)
                     claim_annotation_details.formattedInformation += f"/ lns {claim_annotation_details.linesInParagraph.start}-{claim_annotation_details.linesInParagraph.end}"
@@ -191,3 +193,20 @@ class ClaimsExtractionService:
 
         return start_line, end_line
 
+    @staticmethod
+    def are_paragraphs_similar(paragraph1: str, paragraph2: str, threshold: float = 0.5) -> bool:
+        """
+        Determine if two paragraphs are similar based on cosine similarity.
+        
+        :param paragraph1: First paragraph text.
+        :param paragraph2: Second paragraph text.
+        :param threshold: Similarity threshold to determine if paragraphs are similar.
+        :return: True if similar, False otherwise.
+        """
+        vectorizer = TfidfVectorizer().fit_transform([paragraph1, paragraph2])
+        vectors = vectorizer.toarray()
+        
+        cosine_sim = cosine_similarity(vectors)
+        similarity_score = cosine_sim[0, 1]
+        
+        return similarity_score >= threshold

@@ -63,6 +63,7 @@ class PDFStructureExtractor:
     def process_pages_async_cover(self, doc, numbering_start_page, first_internal_number):
         asyncio.run(self._process_pages_async(doc, numbering_start_page, first_internal_number))
 
+
     async def _process_pages_async(self, doc, numbering_start_page, first_internal_number):
         tasks = [
             self._process_page_data_async(doc, page_num, numbering_start_page, first_internal_number)
@@ -70,6 +71,7 @@ class PDFStructureExtractor:
         ]
         pages_formatted = await asyncio.gather(*tasks)
         self.task.task_document.text_file_with_metadata.pages.extend(pages_formatted)
+
 
     async def _process_page_data_async(self, doc, page_num, numbering_start_page, first_internal_number):
         current_page_internal_page_number = self._calculate_internal_page_number(page_num, numbering_start_page, first_internal_number)
@@ -120,7 +122,6 @@ class PDFStructureExtractor:
             return 0
         return first_internal_number + (page_num - numbering_start_page)
 
-
     @staticmethod
     def _format_block(block):
         return PageContentItem(
@@ -129,6 +130,7 @@ class PDFStructureExtractor:
             columnIndex=block["column"],
             type="text"
         )
+
 
     def _extract_internal_page_numbering(
         self, pdf_document: fitz.Document, max_pages_to_check: int = 5
