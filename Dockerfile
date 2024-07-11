@@ -43,8 +43,8 @@ COPY . .
 # Create necessary directories
 RUN mkdir -p $UPLOAD_FOLDER $EXTRACTED_IMAGES_FOLDER
 
-# Copy the .env file
-COPY .env .env
+# # Copy the .env file
+# COPY .env .env
 
 # Set the entrypoint
 CMD ["python3", "main.py"]
