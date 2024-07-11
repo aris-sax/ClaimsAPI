@@ -6,7 +6,6 @@ from io import BytesIO
 from typing import BinaryIO, List
 
 import fitz
-import docx
 from PIL import Image, ImageFile, UnidentifiedImageError
 from fastapi import UploadFile
 
