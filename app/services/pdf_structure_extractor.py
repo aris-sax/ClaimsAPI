@@ -257,7 +257,7 @@ class PDFStructureExtractor:
             if not block_text or len(block_text) < 50:
                 continue
 
-            column = 1 if block.block.x_1 < pix.width / 2 else 2
+            column = 1 if block.block.x_1 < pix.width * 2/5 else 2
             
             page_texts.append({
                 "column": column,
