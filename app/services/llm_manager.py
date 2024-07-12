@@ -277,7 +277,7 @@ class LLMManager:
                         "        b. Patient outcomes and primary and secondary endpoints\n"
                         "        c. Efficacy of drug in treating a specific disease compared to control. Common efficacy metrics include progression free survival (pfs), overall survival (os), objective response rate (ORR), reduction in risk of death, etc.\n"
                         "        d. Adverse events associated with drug\n"
-                        "   - Try to include less information from the summaries on the first page but instead look for where the data is actually discussed in-depth in the paper\n"
+                        "   - Do not include claims from the abstract, dicussion, or conclusion sections of the paper\n"
                         "   - Include claims ranging from phrases to full paragraphs or tables\n"
                         "   - Don't include more than 3-4 claims maximum unless needed\n"
                         "   - Focus on extracting claims that are similar in style and content to the following examples:\n"
