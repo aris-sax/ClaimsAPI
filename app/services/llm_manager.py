@@ -314,6 +314,7 @@ class LLMManager:
                         "   - Verify all extracted information meets specified criteria\n"
                         "   - Make sure each claim is relevant to demonstrating the drug's efficacy, adverse events associated with the drug, or study design that would be relevant to a patient or physician interested in the drug. If it is not, then remove the entry from the JSON.\n"
                         "   - Double-check page numbers for accuracy\n"
+                         "   - Make sure none of the claims extracted are from the abstract, discussion, or conclusion sections\n"
                         "   - Ensure JSON is well-formed and valid\n"
                         "   - Make sure all citations are consistent\n"
                         "Begin your output with the JSON object as specified in step 3. Do not include any text before or after the JSON output.",
