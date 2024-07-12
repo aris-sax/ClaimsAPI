@@ -164,55 +164,73 @@ class ClaimsExtractionService:
 
 
     @staticmethod
-    def extract_line_numbers_in_paragraph(claim: str, annotation_text: str):
-
+    def extract_line_numbers_in_paragraph(claim: str, annotation_text: str):    
         def normalize_text(text):
             return ' '.join(text.split())
-
+    
         def get_line_number(position, text):
-            return text[:position].count('\n') +1
-        
-        # TODO: Remove this edge case function in the future
+            return text[:position].count('\n') + 1
+    
         def handle_edge_case(claim, annotation_text):
             if len(normalize_text(claim)) > len(normalize_text(annotation_text)):
                 total_lines = annotation_text.count('\n') + 1
                 return 1, total_lines
             return None
-
-
+    
         def find_phrase_position(phrase, text, from_start=True):
             normalized_phrase = normalize_text(phrase)
             normalized_text = normalize_text(text)
             find_func = normalized_text.find if from_start else normalized_text.rfind
-
+    
             position = find_func(normalized_phrase)
             if position != -1:
                 return position + (0 if from_start else len(normalized_phrase))
-
+    
             # If exact match not found, try partial matches
             words = normalized_phrase.split()
             for i in range(len(words), 0, -1):
-                partial_phrase = ' '.join(words[:i] if from_start else words[-i:])
+                if from_start:
+                    partial_phrase = ' '.join(words[:i])
+                else:
+                    partial_phrase = ' '.join(words[-i:])
                 position = find_func(partial_phrase)
                 if position != -1:
                     return position + (0 if from_start else len(partial_phrase))
-
+    
+            # Additional logic to handle corrupted first or last words
+            if from_start:
+                for i in range(1, 3):
+                    if len(words) > i:
+                        partial_phrase = ' '.join(words[i:])
+                        position = find_func(partial_phrase)
+                        if position != -1:
+                            return position
+            else:
+                for i in range(1, 3):
+                    if len(words) > i:
+                        partial_phrase = ' '.join(words[:-i])
+                        position = find_func(partial_phrase)
+                        if position != -1:
+                            return position + len(partial_phrase)
+    
             return -1
-
-
+            
         edge_case_result = handle_edge_case(claim, annotation_text)
         if edge_case_result:
             return edge_case_result
-
+    
         start_pos = find_phrase_position(claim, annotation_text, from_start=True)
         end_pos = find_phrase_position(claim, annotation_text, from_start=False)
-
+    
+        print(f"Start Position: {start_pos}, End Position: {end_pos}")
+    
         if start_pos == -1 or end_pos == -1:
             return -1, -1
-
+            
+    
         start_line = get_line_number(start_pos, annotation_text)
         end_line = get_line_number(end_pos, annotation_text)
-
+    
         return start_line, end_line
 
     @staticmethod
