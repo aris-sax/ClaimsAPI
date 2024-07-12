@@ -10,10 +10,10 @@ import fitz  # PyMuPDF
 from fitz import Page
 import numpy as np
 from anthropic import Anthropic
-import layoutparser as lp
 from PIL import Image
 
 from app.pydantic_schemas.claims_extraction_task import ClaimsExtractionTask, DocumentJsonFormat, PageContentItem, PageJsonFormat
+from app.services.layout_ai_model import Detectron2LayoutModelSingleton
 from app.services.llm_manager import LLMManager
 from app.services.universal_file_processor import PDFTextExtractor
 from app.config import settings
@@ -24,7 +24,6 @@ class PDFStructureExtractor:
     """
     A class to extract structured text blocks from a PDF document.
     """
-    _model_instance = None
 
     def __init__(self, task: ClaimsExtractionTask):
         self.task = task
@@ -32,17 +31,6 @@ class PDFStructureExtractor:
         self.llm_manager = LLMManager()
         self.document_text_blocks = []
         self.logger = logging.getLogger(__name__)
-        
-    @classmethod
-    def _get_layout_model(cls):
-        if cls._model_instance is None:
-            cls._model_instance = lp.Detectron2LayoutModel(
-                'lp://PubLayNet/mask_rcnn_X_101_32x8d_FPN_3x/config',
-                extra_config=["MODEL.ROI_HEADS.SCORE_THRESH_TEST", 0.5]
-            )
-        return cls._model_instance
-
-
 
     def format_clinical_document(self):
         with fitz.open(stream=self.task.task_document.raw_file.content, filetype="pdf") as doc:
@@ -77,11 +65,11 @@ class PDFStructureExtractor:
         current_page_internal_page_number = self._calculate_internal_page_number(page_num, numbering_start_page, first_internal_number)
 
         page = doc.load_page(page_num)
-        model = self._get_layout_model()
+        model = Detectron2LayoutModelSingleton.get_instance()
         page_as_blocks = await self.process_page(page, page_num, model, self.llm_manager_anthropic)
 
         page_blocks_formatted = [self._format_block(block) for block in page_as_blocks]
-
+                
         return PageJsonFormat(
             pageNumber=page_num + 1,
             internalPageNumber=current_page_internal_page_number,
