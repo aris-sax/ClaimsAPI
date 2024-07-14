@@ -284,12 +284,12 @@ class LLMManager:
                         "        b. Patient outcomes and primary and secondary endpoints\n"
                         "        c. Efficacy of drug in treating a specific disease compared to control. Common efficacy metrics include progression free survival (pfs), overall survival (os), objective response rate (ORR), reduction in risk of death, etc.\n"
                         "        d. Adverse events associated with drug\n"
-                        "   - Do not include claims from the abstract, dicussion, or conclusion sections of the paper\n"
                         "   - Include claims ranging from phrases to full paragraphs or tables\n"
                         "   - Focus on extracting claims that are similar in style and content to the following examples:\n"
                         "2. SOURCE IDENTIFICATION:\n"
                         "   - For each claim, note:\n"
                         "       - Page number (use original document footer numbers)\n"
+                        "   - For each claim, determine if it's from the abstract, discussion, or conclusion sections. Set 'inExcludedSection' to 'yes' if it is, 'no' if it's not.\n"
                         "       - Citation in the format: \"FirstAuthor et al. Journal Name Volume(Issue):PageRange\"\n"
                         "3. JSON OUTPUT STRUCTURE:\n"
                         "   Create a JSON object with the following structure:\n"
@@ -298,7 +298,8 @@ class LLMManager:
                         "         {\n"
                         "             \"statement\": \"Exact claim text\",\n"
                         "             \"page\": \"Page number as listed in the document\",\n"
-                        "             \"citation\": \"FirstAuthor et al. Journal Name Volume(Issue):PageRange\"\n"
+                        "             \"citation\": \"FirstAuthor et al. Journal Name Volume(Issue):PageRange\",\n"
+                        "             \"inExcludedSection\": \"yes/no\"\n"
                         "         },\n"
                         "         // ... more claim objects\n"
                         "     ]\n"
@@ -320,8 +321,9 @@ class LLMManager:
                         "   - Verify all extracted information meets specified criteria\n"
                         "   - Make sure each claim is relevant to demonstrating the drug's efficacy, adverse events associated with the drug, or study design that would be relevant to a patient or physician interested in the drug. If it is not, then remove the entry from the JSON.\n"
                         "   - Double-check page numbers for accuracy\n"
-                        "   - Make sure none of the claims extracted are from the abstract, discussion, or conclusion sections\n"
+                        "   - For each claim, determine if it's from the abstract, discussion, or conclusion sections. Set 'inExcludedSection' to 'yes' if it is, 'no' if it's not.\n"
                         "   - Ensure JSON is well-formed and valid\n"
+                        "   - Make sure page numbers are accurate\n"
                         "   - Make sure all citations are consistent\n"
                         "Begin your output with the JSON object as specified in step 3. Do not include any text before or after the JSON output.",
             }
@@ -331,26 +333,25 @@ class LLMManager:
 
         try:
             completion = client.messages.create(
-                model="claude-3-5-sonnet-20240620",
-                max_tokens=2000,
-                temperature=0,
-                messages=messages,
-            )
-            print(completion.content[0].text)
+                    model="claude-3-5-sonnet-20240620",
+                    max_tokens=2000,
+                    temperature=0,
+                    messages=messages,
+                )
             parsed_json = json.loads(completion.content[0].text)
-
             if "extractedClaims" not in parsed_json:
                 print(
                     f"Warning: 'extractedClaims' not found in parsed JSON. Raw response: {completion}"
                 )
                 return []
             claims = parsed_json["extractedClaims"]
-            print(f"Extracted {len(claims)} claims")
-            for i, claim in enumerate(claims[:3]):
-                print(f"Claim {i + 1}: {claim['statement'][:100]}...")
-            return claims
-        except Exception as e:
-            print(f"Error: {e}")
+            print(claims)
+            
+            # Filter out claims from excluded sections
+            filtered_claims = [claim for claim in claims if claim.get('inExcludedSection', 'yes').lower() == 'no']
+            
+            return filtered_claims
+        except json.JSONDecodeError as e:
             print(f"Error parsing JSON in extract_claims: {e}")
             return []
             
