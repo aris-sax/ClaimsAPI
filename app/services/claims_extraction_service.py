@@ -89,7 +89,9 @@ class ClaimsExtractionService:
                 
                 print("Map Claims")
                 for claim in claims:
+                    print(claim)
                     claim_annotation_details: Annotation = self.match_claims_to_blocks(search_text=claim["statement"], page_range=[chunk_start, chunk_end])
+                    print(claim_annotation_details)
                     if claim_annotation_details is not None and self.are_paragraphs_similar(claim["statement"], claim_annotation_details.annotationText):
                         start_line, end_line = self.extract_line_numbers_in_paragraph(claim["statement"], claim_annotation_details.annotationText)
                         claim_annotation_details.linesInParagraph = LineRange(start=start_line, end=end_line)

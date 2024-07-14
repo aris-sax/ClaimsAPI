@@ -241,7 +241,7 @@ class LLMManager:
     @staticmethod
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
     def extract_claims_with_claude(
-        client: Anthropic, full_text: str, images: List[ExtractedImage]
+        client: Anthropic, full_text: str, images: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         content = [
             {
@@ -253,25 +253,25 @@ class LLMManager:
         accepted_image_formats = {"jpeg", "png", "gif", "webp"}
 
         for image in images:
-            if image.image_format.lower() not in accepted_image_formats:
+            if image["image_format"].lower() not in accepted_image_formats:
                 print(
-                    f"Skipping image {image.image_index} from page {image.page_number} due to unsupported format: {image.image_format}"
+                    f"Skipping image {image['image_index']} from page {image['page_number']} due to unsupported format: {image['image_format']}"
                 )
                 continue
 
             try:
-                content.append({"type": "text", "text": f"Image {image.image_index} from page {image.page_number}:"})
+                content.append({"type": "text", "text": f"Image {image['image_index']} from page {image['page_number']}:"})
                 content.append({
                     "type": "image",
                     "source": {
                         "type": "base64",
-                        "media_type": f"image/{image.image_format}",
-                        "data": image.base64_data,
+                        "media_type": f"image/{image['image_format']}",
+                        "data": image["base64_data"],
                     },
                 })
             except Exception as e:
                 print(
-                    f"Error processing image {image.image_index} from page {image.page_number}: {str(e)}"
+                    f"Error processing image {image['image_index']} from page {image['page_number']}: {str(e)}"
                 )
 
         content.append(
@@ -289,7 +289,7 @@ class LLMManager:
                         "2. SOURCE IDENTIFICATION:\n"
                         "   - For each claim, note:\n"
                         "       - Page number (use original document footer numbers)\n"
-                        "   - For each claim, determine if it's from the abstract, discussion, or conclusion sections. Set 'inExcludedSection' to 'yes' if it is, 'no' if it's not.\n"
+                        "   - For each claim, determine if it was found in the abstract, introduction, methodology, results, discussion, or conclusion section. Only classify based on these 5 sections.\n"
                         "       - Citation in the format: \"FirstAuthor et al. Journal Name Volume(Issue):PageRange\"\n"
                         "3. JSON OUTPUT STRUCTURE:\n"
                         "   Create a JSON object with the following structure:\n"
@@ -299,7 +299,7 @@ class LLMManager:
                         "             \"statement\": \"Exact claim text\",\n"
                         "             \"page\": \"Page number as listed in the document\",\n"
                         "             \"citation\": \"FirstAuthor et al. Journal Name Volume(Issue):PageRange\",\n"
-                        "             \"inExcludedSection\": \"yes/no\"\n"
+                        "             \"Section\": \"introduction\"\n"
                         "         },\n"
                         "         // ... more claim objects\n"
                         "     ]\n"
@@ -321,7 +321,7 @@ class LLMManager:
                         "   - Verify all extracted information meets specified criteria\n"
                         "   - Make sure each claim is relevant to demonstrating the drug's efficacy, adverse events associated with the drug, or study design that would be relevant to a patient or physician interested in the drug. If it is not, then remove the entry from the JSON.\n"
                         "   - Double-check page numbers for accuracy\n"
-                        "   - For each claim, determine if it's from the abstract, discussion, or conclusion sections. Set 'inExcludedSection' to 'yes' if it is, 'no' if it's not.\n"
+                        "   - Make sure each claim was classified into its section and the section provided is one of either 'abstract','introduction','methodology','results','discussion','conclusion',' \n"
                         "   - Ensure JSON is well-formed and valid\n"
                         "   - Make sure page numbers are accurate\n"
                         "   - Make sure all citations are consistent\n"
@@ -333,12 +333,13 @@ class LLMManager:
 
         try:
             completion = client.messages.create(
-                    model="claude-3-5-sonnet-20240620",
-                    max_tokens=2000,
-                    temperature=0,
-                    messages=messages,
-                )
+                model="claude-3-5-sonnet-20240620",
+                max_tokens=4000,
+                temperature=0,
+                messages=messages,
+            )
             parsed_json = json.loads(completion.content[0].text)
+            print(parsed_json)
             if "extractedClaims" not in parsed_json:
                 print(
                     f"Warning: 'extractedClaims' not found in parsed JSON. Raw response: {completion}"
@@ -346,9 +347,10 @@ class LLMManager:
                 return []
             claims = parsed_json["extractedClaims"]
             print(claims)
-            
-            # Filter out claims from excluded sections
-            filtered_claims = [claim for claim in claims if claim.get('inExcludedSection', 'yes').lower() == 'no']
+
+            # Filter out claims not in the desired sections
+            desired_sections = {"introduction", "methodology", "results"}
+            filtered_claims = [claim for claim in claims if claim.get('Section') in desired_sections]
             
             return filtered_claims
         except json.JSONDecodeError as e:
