@@ -240,120 +240,120 @@ class LLMManager:
 
     @staticmethod
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
-    def extract_claims_with_claude(
-        client: Anthropic, full_text: str, images: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
-        content = [
-            {
-                "type": "text",
-                "text": f"Here is the text of the academic paper:\n\n{full_text}\n\nNow I will provide the images from the paper, if any were successfully extracted.",
-            }
-        ]
+    def extract_claims_with_claude(client: Anthropic, full_text: str, images: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        try:
+            content = [
+                {
+                    "type": "text",
+                    "text": f"Here is the text of the academic paper:\n\n{full_text}\n\nNow I will provide the images from the paper, if any were successfully extracted.",
+                }
+            ]
 
-        accepted_image_formats = {"jpeg", "png", "gif", "webp"}
+            accepted_image_formats = {"jpeg", "png", "gif", "webp"}
 
-        for image in images:
-            if image["image_format"].lower() not in accepted_image_formats:
-                print(
-                    f"Skipping image {image['image_index']} from page {image['page_number']} due to unsupported format: {image['image_format']}"
-                )
-                continue
+            for image in images:
+                if not isinstance(image, dict):
+                    print(f"Skipping image because it is not a dict:")
+                    continue
+
+                if image.get("image_format", "").lower() not in accepted_image_formats:
+                    print(f"Skipping image {image.get('image_index')} from page {image.get('page_number')} due to unsupported format: {image.get('image_format')}")
+                    continue
+
+                try:
+                    content.append({"type": "text", "text": f"Image {image.get('image_index')} from page {image.get('page_number')}"})
+                    content.append({
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": f"image/{image.get('image_format')}",
+                            "data": image.get("base64_data"),
+                        },
+                    })
+                except Exception as e:
+                    print(f"Error processing image {image.get('image_index')} from page {image.get('page_number')}: {str(e)}")
+
+            content.append(
+                {
+                    "type": "text",
+                    "text":  "You are a highly capable AI assistant tasked with extracting and organizing information from a scientific paper about a drug to then be used on the drug's website. Follow these instructions carefully:\n"
+                            "1. CLAIM EXTRACTION:\n" 
+                            "   - Identify all claims related to:\n"
+                            "        a. Study design\n"
+                            "        b. Patient outcomes and primary and secondary endpoints\n"
+                            "        c. Efficacy of drug in treating a specific disease compared to control. Common efficacy metrics include progression free survival (pfs), overall survival (os), objective response rate (ORR), reduction in risk of death, etc.\n"
+                            "        d. Adverse events associated with drug\n"
+                            "   - Include claims ranging from phrases to full paragraphs or tables\n"
+                            "   - Focus on extracting claims that are similar in style and content to the following examples:\n"
+                            "2. SOURCE IDENTIFICATION:\n"
+                            "   - For each claim, note:\n"
+                            "       - Page number (use original document footer numbers)\n"
+                            "   - For each claim, determine if it was found in the abstract, introduction, methodology, results, discussion, or conclusion section. Only classify based on these 5 sections. Try to have at least a few claims from each\n"
+                            "       - Citation in the format: \"FirstAuthor et al. Journal Name Volume(Issue):PageRange\"\n"
+                            "3. JSON OUTPUT STRUCTURE:\n"
+                            "   Create a JSON object with the following structure:\n"
+                            "   {\n"
+                            "     \"extractedClaims\": [\n"
+                            "         {\n"
+                            "             \"statement\": \"Exact claim text\",\n"
+                            "             \"page\": \"Page number as listed in the document\",\n"
+                            "             \"citation\": \"FirstAuthor et al. Journal Name Volume(Issue):PageRange\",\n"
+                            "             \"Section\": \"introduction\"\n"
+                            "         },\n"
+                            "         // ... more claim objects\n"
+                            "     ]\n"
+                            "   }\n"
+                            "4. SPECIAL CASES:\n"
+                            "   - Multi-page claims: Indicate full range in page field\n"
+                            "   - Missing info: Use null for missing fields\n"
+                            "5. JSON FORMATTING:\n"
+                            "   - Ensure valid JSON format\n"
+                            "   - Use double quotes for strings\n"
+                            "   - Format JSON for readability with appropriate indentation\n"
+                            "6. PROCESSING INSTRUCTIONS:\n"
+                            "   - Analyze the entire document before starting output\n"
+                            "   - Prioritize accuracy over speed\n"
+                            "   - If uncertain about a claim's relevance, include it\n"
+                            "   - Do not summarize or paraphrase claims; use exact text\n"
+                            "   - Try to combine claims that are near each and about the same topic when possible without reducing quality.\n"
+                            "7. SELF-CHECKING:\n"
+                            "   - Verify all extracted information meets specified criteria\n"
+                            "   - Make sure each claim is relevant to demonstrating the drug's efficacy, adverse events associated with the drug, or study design that would be relevant to a patient or physician interested in the drug. If it is not, then remove the entry from the JSON.\n"
+                            "   - Double-check page numbers for accuracy\n"
+                            "   - Make sure each claim was classified into its section and the section provided is one of either 'abstract','introduction','methodology','results','discussion','conclusion',' \n"
+                            "   - Ensure JSON is well-formed and valid\n"
+                            "   - Make sure page numbers are accurate\n"
+                            "   - Make sure all citations are consistent\n"
+                            "Begin your output with the JSON object as specified in step 3. Do not include any text before or after the JSON output.",
+                }
+            )
+
+            messages = [{"role": "user", "content": content}]
 
             try:
-                content.append({"type": "text", "text": f"Image {image['image_index']} from page {image['page_number']}:"})
-                content.append({
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": f"image/{image['image_format']}",
-                        "data": image["base64_data"],
-                    },
-                })
+                completion = client.messages.create(
+                    model="claude-3-5-sonnet-20240620",
+                    max_tokens=4000,
+                    temperature=0,
+                    messages=messages,
+                )
+                parsed_json = json.loads(completion.content[0].text)
+                print(parsed_json)
+                if "extractedClaims" not in parsed_json:
+                    print(
+                        f"Warning: 'extractedClaims' not found in parsed JSON. Raw response: {completion}"
+                    )
+                    return []
+                claims = parsed_json["extractedClaims"]
+                print(claims)
+
+                # Filter out claims not in the desired sections
+                desired_sections = {"introduction", "methodology", "results"}
+                filtered_claims = [claim for claim in claims if claim.get('Section') in desired_sections]
+                
+                return filtered_claims
             except Exception as e:
-                print(
-                    f"Error processing image {image['image_index']} from page {image['page_number']}: {str(e)}"
-                )
-
-        content.append(
-            {
-                "type": "text",
-                "text":  "You are a highly capable AI assistant tasked with extracting and organizing information from a scientific paper about a drug to then be used on the drug's website. Follow these instructions carefully:\n"
-                        "1. CLAIM EXTRACTION:\n" 
-                        "   - Identify all claims related to:\n"
-                        "        a. Study design\n"
-                        "        b. Patient outcomes and primary and secondary endpoints\n"
-                        "        c. Efficacy of drug in treating a specific disease compared to control. Common efficacy metrics include progression free survival (pfs), overall survival (os), objective response rate (ORR), reduction in risk of death, etc.\n"
-                        "        d. Adverse events associated with drug\n"
-                        "   - Include claims ranging from phrases to full paragraphs or tables\n"
-                        "   - Focus on extracting claims that are similar in style and content to the following examples:\n"
-                        "2. SOURCE IDENTIFICATION:\n"
-                        "   - For each claim, note:\n"
-                        "       - Page number (use original document footer numbers)\n"
-                        "   - For each claim, determine if it was found in the abstract, introduction, methodology, results, discussion, or conclusion section. Only classify based on these 5 sections.\n"
-                        "       - Citation in the format: \"FirstAuthor et al. Journal Name Volume(Issue):PageRange\"\n"
-                        "3. JSON OUTPUT STRUCTURE:\n"
-                        "   Create a JSON object with the following structure:\n"
-                        "   {\n"
-                        "     \"extractedClaims\": [\n"
-                        "         {\n"
-                        "             \"statement\": \"Exact claim text\",\n"
-                        "             \"page\": \"Page number as listed in the document\",\n"
-                        "             \"citation\": \"FirstAuthor et al. Journal Name Volume(Issue):PageRange\",\n"
-                        "             \"Section\": \"introduction\"\n"
-                        "         },\n"
-                        "         // ... more claim objects\n"
-                        "     ]\n"
-                        "   }\n"
-                        "4. SPECIAL CASES:\n"
-                        "   - Multi-page claims: Indicate full range in page field\n"
-                        "   - Missing info: Use null for missing fields\n"
-                        "5. JSON FORMATTING:\n"
-                        "   - Ensure valid JSON format\n"
-                        "   - Use double quotes for strings\n"
-                        "   - Format JSON for readability with appropriate indentation\n"
-                        "6. PROCESSING INSTRUCTIONS:\n"
-                        "   - Analyze the entire document before starting output\n"
-                        "   - Prioritize accuracy over speed\n"
-                        "   - If uncertain about a claim's relevance, include it\n"
-                        "   - Do not summarize or paraphrase claims; use exact text\n"
-                        "   - Try to combine claims that are near each and about the same topic when possible without reducing quality.\n"
-                        "7. SELF-CHECKING:\n"
-                        "   - Verify all extracted information meets specified criteria\n"
-                        "   - Make sure each claim is relevant to demonstrating the drug's efficacy, adverse events associated with the drug, or study design that would be relevant to a patient or physician interested in the drug. If it is not, then remove the entry from the JSON.\n"
-                        "   - Double-check page numbers for accuracy\n"
-                        "   - Make sure each claim was classified into its section and the section provided is one of either 'abstract','introduction','methodology','results','discussion','conclusion',' \n"
-                        "   - Ensure JSON is well-formed and valid\n"
-                        "   - Make sure page numbers are accurate\n"
-                        "   - Make sure all citations are consistent\n"
-                        "Begin your output with the JSON object as specified in step 3. Do not include any text before or after the JSON output.",
-            }
-        )
-
-        messages = [{"role": "user", "content": content}]
-
-        try:
-            completion = client.messages.create(
-                model="claude-3-5-sonnet-20240620",
-                max_tokens=4000,
-                temperature=0,
-                messages=messages,
-            )
-            parsed_json = json.loads(completion.content[0].text)
-            print(parsed_json)
-            if "extractedClaims" not in parsed_json:
-                print(
-                    f"Warning: 'extractedClaims' not found in parsed JSON. Raw response: {completion}"
-                )
+                print(f"Error parsing JSON in extract_claims: {e}")
                 return []
-            claims = parsed_json["extractedClaims"]
-            print(claims)
-
-            # Filter out claims not in the desired sections
-            desired_sections = {"introduction", "methodology", "results"}
-            filtered_claims = [claim for claim in claims if claim.get('Section') in desired_sections]
-            
-            return filtered_claims
-        except json.JSONDecodeError as e:
-            print(f"Error parsing JSON in extract_claims: {e}")
-            return []
-            
+        except Exception as e:
+            print(f"Error in extract_claims: {e}")
