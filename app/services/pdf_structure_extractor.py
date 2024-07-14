@@ -1,24 +1,17 @@
-
-
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 from typing import List, Dict, Any, Tuple
-import asyncio
 from difflib import SequenceMatcher
-
 import fitz  # PyMuPDF
 from fitz import Page
 import numpy as np
 from anthropic import Anthropic
 from PIL import Image
-
 from app.pydantic_schemas.claims_extraction_task import ClaimsExtractionTask, DocumentJsonFormat, PageContentItem, PageJsonFormat
 from app.services.layout_ai_model import Detectron2LayoutModelSingleton
 from app.services.llm_manager import LLMManager
 from app.services.universal_file_processor import PDFTextExtractor
 from app.config import settings
-
-
 
 class PDFStructureExtractor:
     """
@@ -45,55 +38,51 @@ class PDFStructureExtractor:
 
         return self.task.task_document.text_file_with_metadata
 
-
-
-
     def process_pages_async_cover(self, doc, numbering_start_page, first_internal_number):
-        asyncio.run(self._process_pages_async(doc, numbering_start_page, first_internal_number))
+        self._process_pages_async(doc, numbering_start_page, first_internal_number)
 
+    def _process_pages_async(self, doc, numbering_start_page, first_internal_number):
+        MAX_WORKERS = 5
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            futures = [
+                executor.submit(self._process_page_data_async, doc, page_num, numbering_start_page, first_internal_number)
+                for page_num in range(len(doc))
+            ]
+            for future in as_completed(futures):
+                page_formatted = future.result()
+                self.task.task_document.text_file_with_metadata.pages.append(page_formatted)
 
-    async def _process_pages_async(self, doc, numbering_start_page, first_internal_number):
-        tasks = [
-            self._process_page_data_async(doc, page_num, numbering_start_page, first_internal_number)
-            for page_num in range(len(doc))
-        ]
-        pages_formatted = await asyncio.gather(*tasks)
-        self.task.task_document.text_file_with_metadata.pages.extend(pages_formatted)
-
-
-    async def _process_page_data_async(self, doc, page_num, numbering_start_page, first_internal_number):
+    def _process_page_data_async(self, doc, page_num, numbering_start_page, first_internal_number):
         current_page_internal_page_number = self._calculate_internal_page_number(page_num, numbering_start_page, first_internal_number)
 
         page = doc.load_page(page_num)
         model = Detectron2LayoutModelSingleton.get_instance()
-        page_as_blocks = await self.process_page(page, page_num, model, self.llm_manager_anthropic)
+        page_as_blocks = self.process_page_sync(page, page_num, model, self.llm_manager_anthropic)
 
         page_blocks_formatted = [self._format_block(block) for block in page_as_blocks]
-                
+
         return PageJsonFormat(
             pageNumber=page_num + 1,
             internalPageNumber=current_page_internal_page_number,
             content=page_blocks_formatted,
         )
 
-
-
-
     def _process_pages(self, doc, numbering_start_page, first_internal_number):
-        MAX_WORKERS = 3
+        MAX_WORKERS = 5
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            futures = [executor.submit(self._process_page_data, doc, page_num, numbering_start_page, first_internal_number)
-                       for page_num in range(len(doc))]
+            futures = [
+                executor.submit(self._process_page_data, doc, page_num, numbering_start_page, first_internal_number)
+                for page_num in range(len(doc))
+            ]
             for future in as_completed(futures):
                 page_formatted = future.result()
                 self.task.task_document.text_file_with_metadata.pages.append(page_formatted)
-
 
     def _process_page_data(self, doc, page_num, numbering_start_page, first_internal_number):
         current_page_internal_page_number = self._calculate_internal_page_number(page_num, numbering_start_page, first_internal_number)
 
         page = doc.load_page(page_num)
-        model = self._get_layout_model()
+        model = Detectron2LayoutModelSingleton.get_instance()
         page_as_blocks = self.process_page_sync(page, page_num, model, self.llm_manager_anthropic)
 
         page_blocks_formatted = [self._format_block(block) for block in page_as_blocks]
@@ -119,21 +108,9 @@ class PDFStructureExtractor:
             type="text"
         )
 
-
     def _extract_internal_page_numbering(
         self, pdf_document: fitz.Document, max_pages_to_check: int = 5
     ) -> Tuple[int, int]:
-        """
-        Extracts the internal page numbering from the first few pages of a PDF document.
-
-        Args:
-        pdf_document (fitz.Document): The PDF document to extract numbering from.
-        max_pages_to_check (int): Maximum number of pages to check for numbering. Defaults to 5.
-
-        Returns:
-        Tuple[int, int]: A tuple containing (page_number_where_numbering_starts, first_internal_page_number).
-                         Returns (0, 0) if no valid numbering is found.
-        """
         num_pages = len(pdf_document)
         pages_to_check = min(max_pages_to_check, num_pages)
 
@@ -148,11 +125,7 @@ class PDFStructureExtractor:
 
         return 0, 0
 
-
-
-
-    async def process_page(self, page: Page, page_num: int, model: any, client: Anthropic) -> List[Dict[str, Any]]:
-        # self.logger.info(f"Processing page {page_num + 1}")
+    def process_page(self, page: Page, page_num: int, model: any, client: Anthropic) -> List[Dict[str, Any]]:
         print(f"Processing page {page_num + 1}")
 
         pix = page.get_pixmap()
@@ -161,31 +134,21 @@ class PDFStructureExtractor:
         np_image = np.array(img)
 
         np_image = self.normalize_image(np_image)
-        layout = await asyncio.to_thread(model.detect, np_image)
+        layout = model.detect(np_image)
 
         filtered_blocks = self.filter_blocks(page, layout)
         self.logger.info(f"Detected {len(filtered_blocks)} text blocks on page {page_num + 1}")
 
         page_texts = self.extract_page_texts(page, pix, filtered_blocks)
         deduplicated_texts = self.deduplicate_texts(page_texts)
-        text_blocks = await self.append_text_blocks(deduplicated_texts, client)
+        text_blocks = self.append_text_blocks(deduplicated_texts, client)
         print(f"Page {page_num + 1} processed successfully. Text blocks extracted: {len(text_blocks)}")
         return text_blocks
 
-
     def process_page_sync(self, page: Page, page_num: int, model: any, client: Anthropic) -> List[Dict[str, Any]]:
-        # Create a new event loop
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            # Run the async function in the event loop
-            return loop.run_until_complete(self.process_page(page, page_num, model, client))
-        finally:
-            # Close the event loop
-            loop.close()
+        return self.process_page(page, page_num, model, client)
 
-
-    async def append_text_blocks(self, deduplicated_texts: List[Dict[str, Any]], client: Anthropic) -> List[Dict[str, Any]]:
+    def append_text_blocks(self, deduplicated_texts: List[Dict[str, Any]], client: Anthropic) -> List[Dict[str, Any]]:
         text_blocks = []
         columns = {1: [], 2: []}
         for text in deduplicated_texts:
@@ -197,7 +160,7 @@ class PDFStructureExtractor:
         for column, texts in enumerate(columns.values(), 1):
             paragraph_number = 1
             for text in texts:
-                if await LLMManager.classify_text_with_claude(client, text['text']):
+                if LLMManager.classify_text_with_claude(client, text['text']):
                     text_blocks.append({
                         "column": column,
                         "paragraph": paragraph_number,

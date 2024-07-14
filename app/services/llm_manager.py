@@ -7,7 +7,7 @@ from openai import AzureOpenAI
 from app.config import settings
 from app.pydantic_schemas.claims_extraction_task import ExtractedImage
 from app.utils.utils import retry_operation
-from tenacity import retry, stop_after_attempt, wait_fixed
+from tenacity import AsyncRetrying,retry, stop_after_attempt, wait_fixed
 
 
 class LLMManager:
@@ -202,10 +202,9 @@ class LLMManager:
             print("Failed to convert image to text after retries: ", e)
             return {"isImageContainText": False, "text": ""}
 
-
     @staticmethod
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
-    async def classify_text_with_claude(client: Anthropic, text: str) -> bool:
+    def classify_text_with_claude(client: Anthropic, text: str) -> bool:
         messages = [
             {
                 "role": "user",
@@ -238,7 +237,7 @@ class LLMManager:
         )
 
         return response == "true"
-    
+
     @staticmethod
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
     def extract_claims_with_claude(
@@ -344,4 +343,3 @@ class LLMManager:
         except json.JSONDecodeError as e:
             print(f"Error parsing JSON in extract_claims: {e}")
             return []
-

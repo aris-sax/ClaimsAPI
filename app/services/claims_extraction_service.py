@@ -1,6 +1,10 @@
 from typing import List, Optional
 from anthropic import Anthropic
 from fastapi import UploadFile
+import concurrent.futures
+from typing import List, Tuple
+
+
 
 from app.pydantic_schemas.claims_extraction_task import (
     Annotation,
@@ -46,27 +50,51 @@ class ClaimsExtractionService:
         doc = fitz.open(stream=self.task.task_document.raw_file.content, filetype="pdf")
         total_pages = len(doc)
         chunk_size = 3
-        for i in range(0, total_pages, chunk_size):
-            print("Extracting Text and Images")
-            pdf_extraction_results = self.extract_full_text_and_images(i, min(i + chunk_size, total_pages))
+        
+        def extract_chunk(chunk_start, chunk_end):
+            print(f"Extracting Text and Images for pages {chunk_start} to {chunk_end}")
+            return self.extract_full_text_and_images(chunk_start, chunk_end)
+        
+        def extract_claims_with_claude(pdf_extraction_results, chunk_start, chunk_end):
             print("Extracting Claims")
-            
             try:
-                claims = LLMManager.extract_claims_with_claude(self.anthropic_client, pdf_extraction_results.full_text, pdf_extraction_results.images)
+                return LLMManager.extract_claims_with_claude(self.anthropic_client, pdf_extraction_results.full_text, pdf_extraction_results.images), chunk_start, chunk_end
             except Exception as e:
-                claims = []
-                print(f"Error in the claims extraction in this group of pages {i, min(i + chunk_size, total_pages)}")
-                print("The error is: ",e)
+                print(f"Error in the claims extraction for pages {chunk_start} to {chunk_end}")
+                print("The error is: ", e)
+                return [], chunk_start, chunk_end
+        
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            # Extract text and images concurrently
+            futures = [executor.submit(extract_chunk, i, min(i + chunk_size, total_pages)) for i in range(0, total_pages, chunk_size)]
+            
+            extraction_results = []
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    extraction_results.append(future.result())
+                except Exception as e:
+                    print(f"Error during text and image extraction: {e}")
+                    extraction_results.append(None)
+            
+            # Extract claims concurrently
+            claim_futures = []
+            for idx, pdf_extraction_results in enumerate(extraction_results):
+                if pdf_extraction_results is not None:
+                    chunk_start = idx * chunk_size
+                    chunk_end = min((idx + 1) * chunk_size, total_pages)
+                    claim_futures.append(executor.submit(extract_claims_with_claude, pdf_extraction_results, chunk_start, chunk_end))
+            
+            for future in concurrent.futures.as_completed(claim_futures):
+                claims, chunk_start, chunk_end = future.result()
                 
-            print("Map Claims")
-            for claim in claims:
-                # Map the claims by search match to the JSON structure
-                claim_annotation_details: Annotation = self.match_claims_to_blocks(search_text=claim["statement"], page_range=[i, min(i + chunk_size, total_pages)])
-                if claim_annotation_details is not None and self.are_paragraphs_similar(claim["statement"], claim_annotation_details.annotationText):
-                    start_line, end_line = self.extract_line_numbers_in_paragraph(claim["statement"], claim_annotation_details.annotationText)
-                    claim_annotation_details.linesInParagraph = LineRange(start=start_line, end=end_line)
-                    claim_annotation_details.formattedInformation += f"/lns {claim_annotation_details.linesInParagraph.start}-{claim_annotation_details.linesInParagraph.end}"
-                    self.task.results.append(ClaimResult(claim=claim["statement"], annotationDetails=claim_annotation_details))
+                print("Map Claims")
+                for claim in claims:
+                    claim_annotation_details: Annotation = self.match_claims_to_blocks(search_text=claim["statement"], page_range=[chunk_start, chunk_end])
+                    if claim_annotation_details is not None and self.are_paragraphs_similar(claim["statement"], claim_annotation_details.annotationText):
+                        start_line, end_line = self.extract_line_numbers_in_paragraph(claim["statement"], claim_annotation_details.annotationText)
+                        claim_annotation_details.linesInParagraph = LineRange(start=start_line, end=end_line)
+                        claim_annotation_details.formattedInformation += f"/lns {claim_annotation_details.linesInParagraph.start}-{claim_annotation_details.linesInParagraph.end}"
+                        self.task.results.append(ClaimResult(claim=claim["statement"], annotationDetails=claim_annotation_details))
                     
         self.task.task_status = TaskStatus.COMPLETE
 
