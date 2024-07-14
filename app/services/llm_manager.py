@@ -250,9 +250,17 @@ class LLMManager:
             }
         ]
 
+        accepted_image_formats = {"jpeg", "png", "gif", "webp"}
+
         for image in images:
+            if image.image_format.lower() not in accepted_image_formats:
+                print(
+                    f"Skipping image {image.image_index} from page {image.page_number} due to unsupported format: {image.image_format}"
+                )
+                continue
+
             try:
-                content.append({"type": "text","text": f"Image {image.image_index} from page {image.page_number}:"})
+                content.append({"type": "text", "text": f"Image {image.image_index} from page {image.page_number}:"})
                 content.append({
                     "type": "image",
                     "source": {
@@ -278,7 +286,6 @@ class LLMManager:
                         "        d. Adverse events associated with drug\n"
                         "   - Do not include claims from the abstract, dicussion, or conclusion sections of the paper\n"
                         "   - Include claims ranging from phrases to full paragraphs or tables\n"
-                        "   - Don't include more than 3-4 claims maximum unless needed\n"
                         "   - Focus on extracting claims that are similar in style and content to the following examples:\n"
                         "2. SOURCE IDENTIFICATION:\n"
                         "   - For each claim, note:\n"
@@ -313,7 +320,7 @@ class LLMManager:
                         "   - Verify all extracted information meets specified criteria\n"
                         "   - Make sure each claim is relevant to demonstrating the drug's efficacy, adverse events associated with the drug, or study design that would be relevant to a patient or physician interested in the drug. If it is not, then remove the entry from the JSON.\n"
                         "   - Double-check page numbers for accuracy\n"
-                         "   - Make sure none of the claims extracted are from the abstract, discussion, or conclusion sections\n"
+                        "   - Make sure none of the claims extracted are from the abstract, discussion, or conclusion sections\n"
                         "   - Ensure JSON is well-formed and valid\n"
                         "   - Make sure all citations are consistent\n"
                         "Begin your output with the JSON object as specified in step 3. Do not include any text before or after the JSON output.",
@@ -324,12 +331,14 @@ class LLMManager:
 
         try:
             completion = client.messages.create(
-                    model="claude-3-5-sonnet-20240620",
-                    max_tokens=2000,
-                    temperature=0,
-                    messages=messages,
-                )
+                model="claude-3-5-sonnet-20240620",
+                max_tokens=2000,
+                temperature=0,
+                messages=messages,
+            )
+            print(completion.content[0].text)
             parsed_json = json.loads(completion.content[0].text)
+
             if "extractedClaims" not in parsed_json:
                 print(
                     f"Warning: 'extractedClaims' not found in parsed JSON. Raw response: {completion}"
@@ -340,6 +349,8 @@ class LLMManager:
             for i, claim in enumerate(claims[:3]):
                 print(f"Claim {i + 1}: {claim['statement'][:100]}...")
             return claims
-        except json.JSONDecodeError as e:
+        except Exception as e:
+            print(f"Error: {e}")
             print(f"Error parsing JSON in extract_claims: {e}")
             return []
+            
