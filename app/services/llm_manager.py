@@ -154,9 +154,10 @@ class LLMManager:
                                 "text": "You are a vision model, your main task is to extract page number "
                                 "from pdf page image. "
                                 "If you couldn't find the page number in pdf page image response "
-                                "with this format {page_number: 0}. we use 0 as our default value. "
+                                "with this format {location:string, lineExtracted: string, page_number: number}. we use 0 as our default value. "
                                 "I want all your responses to be in the same JSON format, if you "
-                                "could locate text please response in this format {page_number: number}.",
+                                "could locate text please response in this format {location:string, lineExtracted: string, page_number: number}."
+                                "The page numbering is usually located at the bottom (Footer) of the page or on the top (Header) section.",
                             },
                             {
                                 "type": "image_url",
@@ -167,8 +168,8 @@ class LLMManager:
                         ],
                     }
                 ],
-                "max_tokens": 4095,
-                "temperature": 0.5,
+                "max_tokens": 300,
+                "temperature": 0,
                 "response_format": {"type": "json_object"},
             }
             timeout_value = 90  # Timeout in seconds
@@ -184,6 +185,7 @@ class LLMManager:
                 return {"page_number": 1}
 
             model_response_as_json = response_json["choices"][0]["message"]["content"]
+            print(model_response_as_json)
             print("Extracted Correct page number out of text successfully.")
             # Ensure that the parsed JSON is a list of dictionaries
             statements_data = json.loads(model_response_as_json).get("page_number", 1)
