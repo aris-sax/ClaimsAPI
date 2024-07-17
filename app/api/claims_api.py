@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, File, UploadFile, HTTPException
 
 from app.pydantic_schemas.apis_response_utils import TaskUuidResponse
-from app.pydantic_schemas.claims_extraction_task import ClaimsExtractionTask, ClaimResult, DocumentJsonFormat
+from app.pydantic_schemas.claims_extraction_task import ClaimsExtractionTask, DocumentJsonFormat
 from app.services.claims_extraction_service import ClaimsExtractionService
 from app.services.tasks_store import ClaimsExtractionStore
 from app.utils.utils import validate_file
