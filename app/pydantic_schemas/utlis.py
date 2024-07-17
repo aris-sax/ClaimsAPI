@@ -1,4 +1,5 @@
 
+from typing import List
 from PIL.Image import Image
 from pydantic import BaseModel
 
@@ -11,3 +12,8 @@ class ImageTracker(BaseModel):
     class Config:
         arbitrary_types_allowed = True
 
+
+
+class PDFExtractionResults(BaseModel):
+    full_text: str
+    images: List[ImageTracker]  # Assuming images are represented as base64 strings

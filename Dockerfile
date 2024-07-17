@@ -29,6 +29,7 @@ RUN pip3 install --no-cache-dir layoutparser
 # Download the model during the build process
 RUN python3 -c "import layoutparser as lp; lp.Detectron2LayoutModel('lp://PubLayNet/mask_rcnn_X_101_32x8d_FPN_3x/config')"
 
+
 # Set up the working directory
 WORKDIR /app
 
@@ -36,6 +37,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
 
+# # Install NLTK data
+# RUN python -m nltk.downloader stopwords punkt wordnet
 
 # Copy the rest of your application
 COPY . .

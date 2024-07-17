@@ -1,7 +1,8 @@
+import asyncio
+import re
 from typing import List, Optional
 from anthropic import Anthropic
 from fastapi import UploadFile
-import concurrent.futures
 from typing import List, Tuple
 
 
@@ -18,6 +19,7 @@ from app.pydantic_schemas.claims_extraction_task import (
     TaskDocumentVariants,
     DocumentJsonFormat,
 )
+from app.pydantic_schemas.utlis import PDFExtractionResults
 from app.services.llm_manager import LLMManager
 from app.services.pdf_structure_extractor import PDFStructureExtractor
 from app.services.tasks_store import ClaimsExtractionStore
@@ -26,6 +28,7 @@ from app.utils.enums import TaskStatus
 from app.utils.utils import generate_uuid
 from app.config import settings
 import fitz  # PyMuPDF
+from fuzzywuzzy import fuzz
 from io import BytesIO
 from PIL import Image
 from difflib import SequenceMatcher
@@ -35,6 +38,15 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 # from sentence_transformers import SentenceTransformer, util
+
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+# from nltk.corpus import stopwords
+# from nltk.tokenize import word_tokenize
+# from nltk.stem import WordNetLemmatizer
+# import numpy as np
+from typing import Optional, List
+
 
 
 class ClaimsExtractionService:
@@ -46,58 +58,69 @@ class ClaimsExtractionService:
 
     def run(self):
         self.pdf_structure_extractor.format_clinical_document()
-        
         doc = fitz.open(stream=self.task.task_document.raw_file.content, filetype="pdf")
-        total_pages = len(doc)
-        chunk_size = 3
-        
-        def extract_chunk(chunk_start, chunk_end):
-            print(f"Extracting Text and Images for pages {chunk_start} to {chunk_end}")
-            return self.extract_full_text_and_images(chunk_start, chunk_end)
-        
-        def extract_claims_with_claude(pdf_extraction_results, chunk_start, chunk_end):
-            print("Extracting Claims")
-            try:
-                return LLMManager.extract_claims_with_claude(self.anthropic_client, pdf_extraction_results.full_text, pdf_extraction_results.images), chunk_start, chunk_end
-            except Exception as e:
-                print(f"Error in the claims extraction for pages {chunk_start} to {chunk_end}")
-                print("The error is: ", e)
-                return [], chunk_start, chunk_end
-        
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            # Extract text and images concurrently
-            futures = [executor.submit(extract_chunk, i, min(i + chunk_size, total_pages)) for i in range(0, total_pages, chunk_size)]
+        for page_range in self._run_get_page_ranges(doc):
+            asyncio.run(self._run_process_page_range(page_range))
             
-            extraction_results = []
-            for future in concurrent.futures.as_completed(futures):
-                try:
-                    extraction_results.append(future.result())
-                except Exception as e:
-                    print(f"Error during text and image extraction: {e}")
-                    extraction_results.append(None)
-            
-            # Extract claims concurrently
-            claim_futures = []
-            for idx, pdf_extraction_results in enumerate(extraction_results):
-                if pdf_extraction_results is not None:
-                    chunk_start = idx * chunk_size
-                    chunk_end = min((idx + 1) * chunk_size, total_pages)
-                    claim_futures.append(executor.submit(extract_claims_with_claude, pdf_extraction_results, chunk_start, chunk_end))
-            
-            for future in concurrent.futures.as_completed(claim_futures):
-                claims, chunk_start, chunk_end = future.result()
-                
-                print("Map Claims")
-                for claim in claims:
-                    claim_annotation_details: Annotation = self.match_claims_to_blocks(search_text=claim["statement"], page_range=[chunk_start, chunk_end])
-                    if claim_annotation_details is not None and self.are_paragraphs_similar(claim["statement"], claim_annotation_details.annotationText):
-                        start_line, end_line = self.extract_line_numbers_in_paragraph(claim["statement"], claim_annotation_details.annotationText)
-                        claim_annotation_details.linesInParagraph = LineRange(start=start_line, end=end_line)
-                        claim_annotation_details.formattedInformation += f"/lns {claim_annotation_details.linesInParagraph.start}-{claim_annotation_details.linesInParagraph.end}"
-                        self.task.results.append(ClaimResult(claim=claim["statement"], annotationDetails=claim_annotation_details))
-                    
         self.task.task_status = TaskStatus.COMPLETE
 
+
+    def _run_get_page_ranges(self, doc, chunk_size=3):
+        total_pages = len(doc)
+        return [(i, min(i + chunk_size, total_pages)) for i in range(0, total_pages, chunk_size)]
+
+
+    async def _run_process_page_range(self, page_range: Tuple[int, int]):
+        print("Start Run Process for pages", page_range)
+        pdf_extraction_results = self.extract_full_text_and_images(*page_range)
+        print("Extracted full text and images for pages", page_range)
+        claims = await self._run_extract_claims(pdf_extraction_results, page_range)
+        print("Length of claims", len(claims))
+        filtered_claims = self._run_filter_claims_based_on_section(claims, ["introduction", "methodology", "results"])
+        print("Length of filtered claims", len(filtered_claims))
+        self._run_map_claims(filtered_claims, page_range)
+        
+        
+    async def _run_extract_claims(self, pdf_extraction_results: PDFExtractionResults, page_range: Tuple[int, int]):
+        try:
+            return LLMManager.extract_claims_with_claude(
+                self.anthropic_client, 
+                pdf_extraction_results.full_text, 
+                pdf_extraction_results.images
+            )
+        except Exception as e:
+            print(f"Error in claims extraction for pages {page_range}: {e}")
+            return []
+
+
+    def _run_filter_claims_based_on_section(self, claims: List[dict], desired_sections: List[str]) -> List[dict]:
+        return [claim for claim in claims if claim.get('Section').lower() in desired_sections]
+
+
+    def _run_map_claims(self, claims, page_range: Tuple[int, int]):
+        for claim in claims:
+            claim_annotation_details: Annotation = self.match_claims_to_blocks(
+                search_text=claim["statement"],
+                page_range=page_range
+            )
+            if claim_annotation_details and self.are_paragraphs_similar(
+                claim["statement"], 
+                claim_annotation_details.annotationText
+            ):
+                self._run_update_claim_annotation(claim, claim_annotation_details)
+
+
+    def _run_update_claim_annotation(self, claim, claim_annotation_details: Annotation):
+        start_line, end_line = self.extract_line_numbers_in_paragraph(
+            claim["statement"], 
+            claim_annotation_details.annotationText
+        )
+        claim_annotation_details.linesInParagraph = LineRange(start=start_line, end=end_line)
+        claim_annotation_details.formattedInformation += f"/lns {start_line}-{end_line}"
+        self.task.results.append(ClaimResult(
+            claim=claim["statement"], 
+            annotationDetails=claim_annotation_details
+        ))
 
     @staticmethod
     def create_and_store_task(clinical_file: UploadFile) -> ClaimsExtractionTask:
@@ -155,15 +178,41 @@ class ClaimsExtractionService:
         return PDFExtractionResult(full_text=full_text, images=images)
 
 
+
     def match_claims_to_blocks(self, search_text: str, page_range: Optional[List[int]] = None) -> Optional[Annotation]:
         def get_similarity(a: str, b: str) -> float:
+            a = _clean_text(a)
+            b = _clean_text(b)
             return SequenceMatcher(None, a.lower(), b.lower()).ratio()
+        
+        def _clean_text( text: str) -> str:
+            # Remove newlines, hyphenated line breaks, and extra spaces, etc...
+            text = re.sub(r'-\n', '', text)
+            text = re.sub(r'\n', ' ', text)
+            text = re.sub(r'\s+', ' ', text).strip()
+            text = re.sub(r'[“”]', '"', text)
+            text = re.sub(r"[‘’]", "'", text)
+            text = re.sub(r"≥", ">=", text)
+            text = re.sub(r"≤", "<=", text)
+            text = re.sub(r"<", "<", text)
+            text = re.sub(r">", ">", text)
+            return text
+        
+        def get_tfidf_cosine_similarity(a: str, b: str, vectorizer: TfidfVectorizer) -> float:
+            tfidf_matrix = vectorizer.fit_transform([a, b])
+            cosine_sim = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2]).flatten()[0]
+            return cosine_sim
+
+
+        vectorizer = TfidfVectorizer()
 
         def process_content(content_to_process: PageContentItem, page_to_process: PageJsonFormat) -> Optional[Annotation]:
             similarity = get_similarity(content_to_process.text, search_text)
+            get_tfidf_similarity = get_tfidf_cosine_similarity(content_to_process.text, search_text, vectorizer)
+            combined_similarity = (0.6 * similarity + 0.4 * get_tfidf_similarity)
             document_name = self.task.task_document.text_file_with_metadata.documentName
-            if similarity > process_content.highest_similarity:
-                process_content.highest_similarity = similarity
+            if combined_similarity > process_content.highest_similarity:
+                process_content.highest_similarity = combined_similarity
                 return Annotation(
                     annotationText=content_to_process.text,
                     documentName=document_name,
@@ -183,7 +232,7 @@ class ClaimsExtractionService:
             pages = pages[page_range[0]:page_range[1]]
 
         for page in pages:
-            for content in page.content:
+            for content in page.content:                
                 current_match = process_content(content, page)
                 if current_match:
                     best_match = current_match
@@ -192,75 +241,74 @@ class ClaimsExtractionService:
 
 
     @staticmethod
-    def extract_line_numbers_in_paragraph(claim: str, annotation_text: str):    
+    def extract_line_numbers_in_paragraph(claim: str, annotation_text: str):
         def normalize_text(text):
+            text = re.sub(r'-\n', '', text)
+            text = re.sub(r'\n', ' ', text)
+            text = re.sub(r'\s+', ' ', text).strip()
+            text = re.sub(r'[“”]', '"', text)
+            text = re.sub(r"[‘’]", "'", text)
+            text = re.sub(r"≥", ">=", text)
+            text = re.sub(r"≤", "<=", text)
+            text = re.sub(r"<", "<", text)
+            text = re.sub(r">", ">", text)
+            text = re.sub(r'[^\w\s]', '', text.lower())
             return ' '.join(text.split())
-    
+        
         def get_line_number(position, text):
             return text[:position].count('\n') + 1
-    
+        
         def handle_edge_case(claim, annotation_text):
             if len(normalize_text(claim)) > len(normalize_text(annotation_text)):
                 total_lines = annotation_text.count('\n') + 1
                 return 1, total_lines
             return None
-    
+        
         def find_phrase_position(phrase, text, from_start=True):
             normalized_phrase = normalize_text(phrase)
             normalized_text = normalize_text(text)
-            find_func = normalized_text.find if from_start else normalized_text.rfind
-    
-            position = find_func(normalized_phrase)
-            if position != -1:
-                return position + (0 if from_start else len(normalized_phrase))
-    
-            # If exact match not found, try partial matches
-            words = normalized_phrase.split()
-            for i in range(len(words), 0, -1):
-                if from_start:
-                    partial_phrase = ' '.join(words[:i])
-                else:
-                    partial_phrase = ' '.join(words[-i:])
-                position = find_func(partial_phrase)
-                if position != -1:
-                    return position + (0 if from_start else len(partial_phrase))
-    
-            # Additional logic to handle corrupted first or last words
-            if from_start:
-                for i in range(1, 3):
-                    if len(words) > i:
-                        partial_phrase = ' '.join(words[i:])
-                        position = find_func(partial_phrase)
-                        if position != -1:
-                            return position
-            else:
-                for i in range(1, 3):
-                    if len(words) > i:
-                        partial_phrase = ' '.join(words[:-i])
-                        position = find_func(partial_phrase)
-                        if position != -1:
-                            return position + len(partial_phrase)
-    
-            return -1
             
+            if from_start:
+                words = normalized_text.split()
+                for i in range(len(words)):
+                    substring = ' '.join(words[i:i+len(normalized_phrase.split())])
+                    ratio = fuzz.ratio(normalized_phrase, substring)
+                    if ratio > 90:
+                        position = normalized_text.index(substring)
+                        print(f"Match found at position {position} with ratio {ratio}")
+                        print(f"Matched text: {text[position:position+50]}...")
+                        return position
+            else:
+                words = normalized_text.split()
+                for i in range(len(words)-1, -1, -1):
+                    substring = ' '.join(words[max(0, i-len(normalized_phrase.split())+1):i+1])
+                    ratio = fuzz.ratio(normalized_phrase, substring)
+                    if ratio > 90:
+                        position = normalized_text.index(substring) + len(substring)
+                        print(f"Match found at position {position} with ratio {ratio}")
+                        print(f"Matched text: ...{text[max(0, position-50):position]}")
+                        return position
+            
+            return -1
+        
         edge_case_result = handle_edge_case(claim, annotation_text)
         if edge_case_result:
             return edge_case_result
-    
+        
         start_pos = find_phrase_position(claim, annotation_text, from_start=True)
         end_pos = find_phrase_position(claim, annotation_text, from_start=False)
-    
+        
         print(f"Start Position: {start_pos}, End Position: {end_pos}")
-    
+        
         if start_pos == -1 or end_pos == -1:
             return -1, -1
-            
-    
+        
         start_line = get_line_number(start_pos, annotation_text)
         end_line = get_line_number(end_pos, annotation_text)
-    
+        
         return start_line, end_line
-
+    
+        
     @staticmethod
     def are_paragraphs_similar(paragraph1: str, paragraph2: str, threshold: float = 0.5) -> bool:
         """
@@ -271,6 +319,22 @@ class ClaimsExtractionService:
         :param threshold: Similarity threshold to determine if paragraphs are similar.
         :return: True if similar, False otherwise.
         """
+        def normalize_text(text):
+            text = re.sub(r'-\n', '', text)
+            text = re.sub(r'\n', ' ', text)
+            text = re.sub(r'\s+', ' ', text).strip()
+            text = re.sub(r'[“”]', '"', text)
+            text = re.sub(r"[‘’]", "'", text)
+            text = re.sub(r"≥", ">=", text)
+            text = re.sub(r"≤", "<=", text)
+            text = re.sub(r"<", "<", text)
+            text = re.sub(r">", ">", text)
+            text = re.sub(r'[^\w\s]', '', text.lower())
+            return ' '.join(text.split())
+        
+        paragraph1 = normalize_text(paragraph1)
+        paragraph2 = normalize_text(paragraph2)
+        
         vectorizer = TfidfVectorizer().fit_transform([paragraph1, paragraph2])
         vectors = vectorizer.toarray()
         
@@ -286,3 +350,8 @@ class ClaimsExtractionService:
     #     cosine_sim = util.pytorch_cos_sim(embeddings[0], embeddings[1])
         
     #     return cosine_sim.item() >= threshold
+    
+    
+
+
+

@@ -1,3 +1,4 @@
+import asyncio
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 from typing import List, Dict, Any, Tuple
@@ -113,14 +114,29 @@ class PDFStructureExtractor:
     ) -> Tuple[int, int]:
         num_pages = len(pdf_document)
         pages_to_check = min(max_pages_to_check, num_pages)
+        
+        def extract_number(page):
+            page_as_image = PDFTextExtractor.pdf_page_to_base64(page)
+            return self.llm_manager.extract_page_number_from_image(page_as_image)
+
+
+        async def extract_numbers_async(current_page_num):
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                current_page = pdf_document.load_page(current_page_num)
+                next_page = pdf_document.load_page(current_page_num + 1)
+                
+                extracted_number, next_page_extracted_number = await asyncio.gather(
+                    loop.run_in_executor(pool, extract_number, current_page),
+                    loop.run_in_executor(pool, extract_number, next_page)
+                )
+                
+                return extracted_number, next_page_extracted_number
 
         for current_page_num in range(pages_to_check):
-            current_page = pdf_document.load_page(current_page_num)
-            page_as_image = PDFTextExtractor.pdf_page_to_base64(current_page)
-            extracted_number = self.llm_manager.extract_page_number_from_image(
-                page_as_image
-            )
-            if extracted_number != 0:
+            extracted_number, next_page_extracted_number = asyncio.run(extract_numbers_async(current_page_num))
+            
+            if extracted_number != 0 and extracted_number == (next_page_extracted_number - 1):
                 return current_page_num, extracted_number
 
         return 0, 0

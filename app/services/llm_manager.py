@@ -255,7 +255,7 @@ class LLMManager:
 
             for image in images:
                 if not isinstance(image, dict):
-                    print(f"Skipping image because it is not a dict:")
+                    print("Skipping image because it is not a dict:")
                     continue
 
                 if image.get("image_format", "").lower() not in accepted_image_formats:
@@ -340,20 +340,18 @@ class LLMManager:
                     messages=messages,
                 )
                 parsed_json = json.loads(completion.content[0].text)
-                print(parsed_json)
                 if "extractedClaims" not in parsed_json:
                     print(
                         f"Warning: 'extractedClaims' not found in parsed JSON. Raw response: {completion}"
                     )
                     return []
                 claims = parsed_json["extractedClaims"]
-                print(claims)
 
                 # Filter out claims not in the desired sections
-                desired_sections = {"introduction", "methodology", "results"}
-                filtered_claims = [claim for claim in claims if claim.get('Section') in desired_sections]
+                # desired_sections = {"introduction", "methodology", "results"}
+                # filtered_claims = [claim for claim in claims if claim.get('Section') in desired_sections]
                 
-                return filtered_claims
+                return claims
             except Exception as e:
                 print(f"Error parsing JSON in extract_claims: {e}")
                 return []
