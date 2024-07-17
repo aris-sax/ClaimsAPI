@@ -25,13 +25,11 @@ from app.services.pdf_structure_extractor import PDFStructureExtractor
 from app.services.tasks_store import ClaimsExtractionStore
 from app.services.universal_file_processor import FileProcessingService
 from app.utils.enums import TaskStatus
-from app.utils.utils import generate_uuid
+from app.utils.utils import generate_uuid, normalize_text
 from app.config import settings
 import fitz  # PyMuPDF
-from fuzzywuzzy import fuzz
 from io import BytesIO
 from PIL import Image
-from difflib import SequenceMatcher
 import base64
 
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -46,6 +44,8 @@ from sklearn.metrics.pairwise import cosine_similarity
 # from nltk.stem import WordNetLemmatizer
 # import numpy as np
 from typing import Optional, List
+from fuzzywuzzy import fuzz
+
 
 
 
@@ -57,6 +57,7 @@ class ClaimsExtractionService:
         self.pdf_structure_extractor = PDFStructureExtractor(self.task)
 
     def run(self):
+        #Extract the text_file_with_metadata from the raw_file
         self.pdf_structure_extractor.format_clinical_document()
         doc = fitz.open(stream=self.task.task_document.raw_file.content, filetype="pdf")
         for page_range in self._run_get_page_ranges(doc):
@@ -65,13 +66,20 @@ class ClaimsExtractionService:
         self.task.task_status = TaskStatus.COMPLETE
 
 
-    def _run_get_page_ranges(self, doc, chunk_size=3):
-        total_pages = len(doc)
-        return [(i, min(i + chunk_size, total_pages)) for i in range(0, total_pages, chunk_size)]
+    def _run_get_page_ranges(self, doc: fitz.Document, number_of_selected_pages_per_chunk: int = 3) -> list[tuple[int, int]]:
+        total_pages = doc.page_count
+        page_ranges = []
+
+        for i in range(0, total_pages, number_of_selected_pages_per_chunk):
+            end_page = min(i + number_of_selected_pages_per_chunk, total_pages)
+            page_ranges.append((i, end_page))
+
+        return page_ranges
 
 
     async def _run_process_page_range(self, page_range: Tuple[int, int]):
         print("Start Run Process for pages", page_range)
+        #TODO: Fix this function
         pdf_extraction_results = self.extract_full_text_and_images(*page_range)
         print("Extracted full text and images for pages", page_range)
         claims = await self._run_extract_claims(pdf_extraction_results, page_range)
@@ -180,47 +188,39 @@ class ClaimsExtractionService:
 
 
     def match_claims_to_blocks(self, search_text: str, page_range: Optional[List[int]] = None) -> Optional[Annotation]:
-        def get_similarity(a: str, b: str) -> float:
-            a = _clean_text(a)
-            b = _clean_text(b)
-            return SequenceMatcher(None, a.lower(), b.lower()).ratio()
-        
-        def _clean_text( text: str) -> str:
-            # Remove newlines, hyphenated line breaks, and extra spaces, etc...
-            text = re.sub(r'-\n', '', text)
-            text = re.sub(r'\n', ' ', text)
-            text = re.sub(r'\s+', ' ', text).strip()
-            text = re.sub(r'[“”]', '"', text)
-            text = re.sub(r"[‘’]", "'", text)
-            text = re.sub(r"≥", ">=", text)
-            text = re.sub(r"≤", "<=", text)
-            text = re.sub(r"<", "<", text)
-            text = re.sub(r">", ">", text)
-            return text
-        
-        def get_tfidf_cosine_similarity(a: str, b: str, vectorizer: TfidfVectorizer) -> float:
-            tfidf_matrix = vectorizer.fit_transform([a, b])
-            cosine_sim = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2]).flatten()[0]
-            return cosine_sim
+        def match_subtext(subtext: str, text_blocks: List[str], threshold: int = 25) -> Optional[Tuple[str, int]]:
+            subtext = normalize_text(subtext)
+            matched_blocks = [
+                (block, fuzz.partial_ratio(subtext, normalize_text(block)))
+                for block in text_blocks
+                if fuzz.partial_ratio(subtext, normalize_text(block)) >= threshold
+            ]
+            if matched_blocks:
+                matched_blocks.sort(key=lambda x: x[1], reverse=True)
+                return matched_blocks[0]
+            return None
 
-
-        vectorizer = TfidfVectorizer()
-
-        def process_content(content_to_process: PageContentItem, page_to_process: PageJsonFormat) -> Optional[Annotation]:
-            similarity = get_similarity(content_to_process.text, search_text)
-            get_tfidf_similarity = get_tfidf_cosine_similarity(content_to_process.text, search_text, vectorizer)
-            combined_similarity = (0.6 * similarity + 0.4 * get_tfidf_similarity)
+        def process_content(page_content: List[PageContentItem], page_to_process: PageJsonFormat) -> Optional[Annotation]:
             document_name = self.task.task_document.text_file_with_metadata.documentName
-            if combined_similarity > process_content.highest_similarity:
-                process_content.highest_similarity = combined_similarity
+            text_blocks = [content.text for content in page_content]
+            top_match = match_subtext(search_text, text_blocks)
+
+            if top_match and top_match[1] > process_content.highest_similarity:
+                highest_similarity_content = next(content for content in page_content if content.text == top_match[0])
+                print("-------------------")
+                print(f"Match found with score {top_match[1]}")
+                print(f"Match found with As Text {top_match[0][:10]} : Claim {search_text}")
+                print("-------------------")
+
+                process_content.highest_similarity = top_match[1]
                 return Annotation(
-                    annotationText=content_to_process.text,
+                    annotationText=highest_similarity_content.text,
                     documentName=document_name,
                     pageNumber=page_to_process.pageNumber,
                     internalPageNumber=page_to_process.internalPageNumber,
-                    columnNumber=content_to_process.columnIndex,  
-                    paragraphNumber=content_to_process.paragraphIndex,  
-                    formattedInformation=f"{document_name}/p{page_to_process.internalPageNumber}/col{content_to_process.columnIndex}/¶{content_to_process.paragraphIndex}",
+                    columnNumber=highest_similarity_content.columnIndex,
+                    paragraphNumber=highest_similarity_content.paragraphIndex,
+                    formattedInformation=f"{document_name}/p{page_to_process.internalPageNumber}/col{highest_similarity_content.columnIndex}/¶{highest_similarity_content.paragraphIndex}",
                 )
             return None
 
@@ -232,28 +232,15 @@ class ClaimsExtractionService:
             pages = pages[page_range[0]:page_range[1]]
 
         for page in pages:
-            for content in page.content:                
-                current_match = process_content(content, page)
-                if current_match:
-                    best_match = current_match
+            current_match = process_content(page.content, page)
+            if current_match:
+                best_match = current_match
 
         return best_match
 
 
     @staticmethod
     def extract_line_numbers_in_paragraph(claim: str, annotation_text: str):
-        def normalize_text(text):
-            text = re.sub(r'-\n', '', text)
-            text = re.sub(r'\n', ' ', text)
-            text = re.sub(r'\s+', ' ', text).strip()
-            text = re.sub(r'[“”]', '"', text)
-            text = re.sub(r"[‘’]", "'", text)
-            text = re.sub(r"≥", ">=", text)
-            text = re.sub(r"≤", "<=", text)
-            text = re.sub(r"<", "<", text)
-            text = re.sub(r">", ">", text)
-            text = re.sub(r'[^\w\s]', '', text.lower())
-            return ' '.join(text.split())
         
         def get_line_number(position, text):
             return text[:position].count('\n') + 1
@@ -319,19 +306,6 @@ class ClaimsExtractionService:
         :param threshold: Similarity threshold to determine if paragraphs are similar.
         :return: True if similar, False otherwise.
         """
-        def normalize_text(text):
-            text = re.sub(r'-\n', '', text)
-            text = re.sub(r'\n', ' ', text)
-            text = re.sub(r'\s+', ' ', text).strip()
-            text = re.sub(r'[“”]', '"', text)
-            text = re.sub(r"[‘’]", "'", text)
-            text = re.sub(r"≥", ">=", text)
-            text = re.sub(r"≤", "<=", text)
-            text = re.sub(r"<", "<", text)
-            text = re.sub(r">", ">", text)
-            text = re.sub(r'[^\w\s]', '', text.lower())
-            return ' '.join(text.split())
-        
         paragraph1 = normalize_text(paragraph1)
         paragraph2 = normalize_text(paragraph2)
         
@@ -342,16 +316,5 @@ class ClaimsExtractionService:
         similarity_score = cosine_sim[0, 1]
         
         return similarity_score >= threshold
-
-    # @staticmethod
-    # def are_sentences_similar(sentence1: str, sentence2: str, threshold: float = 0.5) -> bool:
-    #     model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
-    #     embeddings = model.encode([sentence1, sentence2])
-    #     cosine_sim = util.pytorch_cos_sim(embeddings[0], embeddings[1])
-        
-    #     return cosine_sim.item() >= threshold
-    
-    
-
 
 

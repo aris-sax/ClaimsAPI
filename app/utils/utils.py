@@ -68,3 +68,18 @@ def preprocess_text(text: str) -> str:
     text = re.sub(r'[^\w\s]', '', text)
     text = ' '.join(text.split())
     return text
+
+
+
+def normalize_text(text):
+    text = re.sub(r'-\n', '', text)
+    text = re.sub(r'\n', ' ', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    text = re.sub(r'[“”]', '"', text)
+    text = re.sub(r"[‘’]", "'", text)
+    text = re.sub(r"≥", ">=", text)
+    text = re.sub(r"≤", "<=", text)
+    text = re.sub(r"<", "<", text)
+    text = re.sub(r">", ">", text)
+    text = text.lower()
+    return ' '.join(text.split())
