@@ -123,7 +123,7 @@ class ClaimsExtractionService:
                 self._run_update_claim_annotation(claim, claim_annotation_details)
             else:
                 print(f"Claim not found in the document: {claim['statement']}")
-                self.task.results.append(ClaimResult(claim=claim["statement"]))
+                # self.task.results.append(ClaimResult(claim=claim["statement"]))
 
 
     def _run_update_claim_annotation(self, claim, claim_annotation_details: Annotation):
