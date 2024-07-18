@@ -204,7 +204,7 @@ def fuzzy_word_similarity(text1: str, text2: str) -> float:
 
     def find_subsequence_similarity(subsequence: List[str], sequence: List[str]) -> float:
         subsequence_str = " ".join(subsequence)
-        sequence_str = " ".join(sequence)
+        # sequence_str = " ".join(sequence)
         max_similarity = 0
 
         # Slide over the sequence to find the best match

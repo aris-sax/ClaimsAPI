@@ -1,11 +1,8 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-import re
-from time import sleep
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from anthropic import Anthropic
 from fastapi import UploadFile
-from typing import List, Tuple
 
 
 
@@ -37,15 +34,6 @@ import base64
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-# from sentence_transformers import SentenceTransformer, util
-
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-# from nltk.corpus import stopwords
-# from nltk.tokenize import word_tokenize
-# from nltk.stem import WordNetLemmatizer
-# import numpy as np
-from typing import Optional, List
 from fuzzywuzzy import fuzz
 
 
@@ -69,7 +57,7 @@ class ClaimsExtractionService:
             futures = [executor.submit(self._run_process_page_range, page_range) for page_range in page_ranges]
             for future in futures:
                 result = future.result()
-                print("Processed pages result:", result)
+                # print("Processed pages result:", result)
 
         self.task.task_status = TaskStatus.COMPLETE
 
@@ -343,8 +331,6 @@ class ClaimsExtractionService:
                     ratio = fuzz.ratio(normalized_phrase, substring)
                     if ratio > 90:
                         position = normalized_text.index(substring)
-                        print(f"Match found at position {position} with ratio {ratio}")
-                        print(f"Matched text: {text[position:position+50]}...")
                         return position
             else:
                 words = normalized_text.split()
