@@ -18,7 +18,6 @@ from app.pydantic_schemas.claims_extraction_task import (
     TaskDocumentVariants,
     DocumentJsonFormat,
 )
-from app.pydantic_schemas.utlis import PDFExtractionResults
 from app.services.llm_manager import LLMManager
 from app.services.pdf_structure_extractor import PDFStructureExtractor
 from app.services.tasks_store import ClaimsExtractionStore
@@ -85,7 +84,7 @@ class ClaimsExtractionService:
         return f"Processed pages {page_range}"
         
         
-    async def _run_extract_claims(self, pdf_extraction_results: PDFExtractionResults, page_range: Tuple[int, int]):
+    async def _run_extract_claims(self, pdf_extraction_results: PDFExtractionResult, page_range: Tuple[int, int]):
         try:
             return LLMManager.extract_claims_with_claude(
                 self.anthropic_client, 
@@ -339,8 +338,6 @@ class ClaimsExtractionService:
                     ratio = fuzz.ratio(normalized_phrase, substring)
                     if ratio > 90:
                         position = normalized_text.index(substring) + len(substring)
-                        print(f"Match found at position {position} with ratio {ratio}")
-                        print(f"Matched text: ...{text[max(0, position-50):position]}")
                         return position
             
             return -1

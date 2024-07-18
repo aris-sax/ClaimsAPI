@@ -9,7 +9,7 @@ import fitz
 from PIL import Image, ImageFile, UnidentifiedImageError
 from fastapi import UploadFile
 
-from app.pydantic_schemas.utlis import ImageTracker
+from app.pydantic_schemas.utils import ImageTracker
 from app.pydantic_schemas.claims_extraction_task import CustomFilePayload
 from app.services.llm_manager import LLMManager
 from app.utils.enums import FileType

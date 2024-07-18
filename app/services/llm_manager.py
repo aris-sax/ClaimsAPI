@@ -242,7 +242,7 @@ class LLMManager:
 
     @staticmethod
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
-    def extract_claims_with_claude(client: Anthropic, full_text: str, images: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def extract_claims_with_claude(client: Anthropic, full_text: str, images: List[ExtractedImage]) -> List[Dict[str, Any]]:
         try:
             content = [
                 {
@@ -254,26 +254,28 @@ class LLMManager:
             accepted_image_formats = {"jpeg", "png", "gif", "webp"}
 
             for image in images:
-                if not isinstance(image, dict):
-                    print("Skipping image because it is not a dict:")
+                if not isinstance(image, ExtractedImage):
+                    print("Skipping image because it is not a ExtractedImage:")
+                    print(type(image))
+                    print(image)
                     continue
 
-                if image.get("image_format", "").lower() not in accepted_image_formats:
-                    print(f"Skipping image {image.get('image_index')} from page {image.get('page_number')} due to unsupported format: {image.get('image_format')}")
+                if image.image_format.lower() not in accepted_image_formats:
+                    print(f"Skipping image {image.image_index} from page {image.page_number} due to unsupported format: {image.image_format}")
                     continue
 
                 try:
-                    content.append({"type": "text", "text": f"Image {image.get('image_index')} from page {image.get('page_number')}"})
+                    content.append({"type": "text", "text": f"Image {image.image_index} from page {image.page_number}"})
                     content.append({
                         "type": "image",
                         "source": {
                             "type": "base64",
-                            "media_type": f"image/{image.get('image_format')}",
-                            "data": image.get("base64_data"),
+                            "media_type": f"image/{image.image_format}",
+                            "data": image.base64_data,
                         },
                     })
                 except Exception as e:
-                    print(f"Error processing image {image.get('image_index')} from page {image.get('page_number')}: {str(e)}")
+                    print(f"Error processing image {image.image_format} from page {image.page_number}: {str(e)}")
 
             content.append(
                 {

@@ -1,4 +1,3 @@
-
 from typing import List
 from PIL.Image import Image
 from pydantic import BaseModel
