@@ -52,6 +52,9 @@ class PDFStructureExtractor:
             for future in as_completed(futures):
                 page_formatted = future.result()
                 self.task.task_document.text_file_with_metadata.pages.append(page_formatted)
+        #After all tasks are completed arrange the pages data based on the page_formatted.pageNumber  value
+        self.task.task_document.text_file_with_metadata.pages.sort(key=lambda x: x.pageNumber)
+
 
     def _process_page_data_async(self, doc, page_num, numbering_start_page, first_internal_number):
         current_page_internal_page_number = self._calculate_internal_page_number(page_num, numbering_start_page, first_internal_number)

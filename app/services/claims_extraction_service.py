@@ -1,5 +1,7 @@
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import re
+from time import sleep
 from typing import List, Optional
 from anthropic import Anthropic
 from fastapi import UploadFile
@@ -25,7 +27,7 @@ from app.services.pdf_structure_extractor import PDFStructureExtractor
 from app.services.tasks_store import ClaimsExtractionStore
 from app.services.universal_file_processor import FileProcessingService
 from app.utils.enums import TaskStatus
-from app.utils.utils import generate_uuid, normalize_text
+from app.utils.utils import combined_best_match, generate_uuid, normalize_text
 from app.config import settings
 import fitz  # PyMuPDF
 from io import BytesIO
@@ -60,9 +62,15 @@ class ClaimsExtractionService:
         #Extract the text_file_with_metadata from the raw_file
         self.pdf_structure_extractor.format_clinical_document()
         doc = fitz.open(stream=self.task.task_document.raw_file.content, filetype="pdf")
-        for page_range in self._run_get_page_ranges(doc):
-            asyncio.run(self._run_process_page_range(page_range))
-            
+        page_ranges = self._run_get_page_ranges(doc)
+        print("Page ranges:", page_ranges)
+        # Run the concurrent processing of page ranges
+        with ThreadPoolExecutor(max_workers=50) as executor:
+            futures = [executor.submit(self._run_process_page_range, page_range) for page_range in page_ranges]
+            for future in futures:
+                result = future.result()
+                print("Processed pages result:", result)
+
         self.task.task_status = TaskStatus.COMPLETE
 
 
@@ -77,16 +85,16 @@ class ClaimsExtractionService:
         return page_ranges
 
 
-    async def _run_process_page_range(self, page_range: Tuple[int, int]):
+    def _run_process_page_range(self, page_range: Tuple[int, int]):
         print("Start Run Process for pages", page_range)
         #TODO: Fix this function
         pdf_extraction_results = self.extract_full_text_and_images(*page_range)
-        print("Extracted full text and images for pages", page_range)
-        claims = await self._run_extract_claims(pdf_extraction_results, page_range)
+        claims = asyncio.run(self._run_extract_claims(pdf_extraction_results, page_range))
         print("Length of claims", len(claims))
         filtered_claims = self._run_filter_claims_based_on_section(claims, ["introduction", "methodology", "results"])
         print("Length of filtered claims", len(filtered_claims))
         self._run_map_claims(filtered_claims, page_range)
+        return f"Processed pages {page_range}"
         
         
     async def _run_extract_claims(self, pdf_extraction_results: PDFExtractionResults, page_range: Tuple[int, int]):
@@ -107,15 +115,15 @@ class ClaimsExtractionService:
 
     def _run_map_claims(self, claims, page_range: Tuple[int, int]):
         for claim in claims:
-            claim_annotation_details: Annotation = self.match_claims_to_blocks(
+            claim_annotation_details: Annotation | None = self.match_claims_to_blocks(
                 search_text=claim["statement"],
                 page_range=page_range
             )
-            if claim_annotation_details and self.are_paragraphs_similar(
-                claim["statement"], 
-                claim_annotation_details.annotationText
-            ):
+            if claim_annotation_details:
                 self._run_update_claim_annotation(claim, claim_annotation_details)
+            else:
+                print(f"Claim not found in the document: {claim['statement']}")
+                self.task.results.append(ClaimResult(claim=claim["statement"]))
 
 
     def _run_update_claim_annotation(self, claim, claim_annotation_details: Annotation):
@@ -187,32 +195,56 @@ class ClaimsExtractionService:
 
 
 
-    def match_claims_to_blocks(self, search_text: str, page_range: Optional[List[int]] = None) -> Optional[Annotation]:
-        def match_subtext(subtext: str, text_blocks: List[str], threshold: int = 25) -> Optional[Tuple[str, int]]:
-            subtext = normalize_text(subtext)
-            matched_blocks = [
-                (block, fuzz.partial_ratio(subtext, normalize_text(block)))
-                for block in text_blocks
-                if fuzz.partial_ratio(subtext, normalize_text(block)) >= threshold
-            ]
-            if matched_blocks:
-                matched_blocks.sort(key=lambda x: x[1], reverse=True)
-                return matched_blocks[0]
-            return None
+    def match_claims_to_blocks_old(self, search_text: str, page_range: Optional[List[int]] = None) -> Optional[Annotation]:
+
+        def match_subtext(subtext: str, text_blocks: List[str], threshold: float = 0.1) -> Optional[Tuple[int, float]]:
+            if not text_blocks:
+                print("ERROR: text_blocks list is empty")
+
+            all_texts = [normalize_text(text) for text in text_blocks]
+
+            # Add the normalized subtext to the list of texts
+            subtext_normalized = normalize_text(subtext)
+            all_texts.append(subtext_normalized)
+
+            # Compute TF-IDF vectors for all texts
+            vectorizer = TfidfVectorizer().fit_transform(all_texts)
+            vectors = vectorizer.toarray()
+
+            if vectors.shape[0] < 2:
+                raise ValueError("Not enough text data to compute similarities")
+
+            # Calculate cosine similarity between the subtext and all document texts
+            similarities = cosine_similarity([vectors[-1]], vectors[:-1])[0]
+
+            # Find the most similar text
+            most_similar_index = similarities.argmax()
+            similarity_score = similarities[most_similar_index]
+
+            if similarity_score > threshold:
+                return most_similar_index, similarity_score
+            else:
+                return None
 
         def process_content(page_content: List[PageContentItem], page_to_process: PageJsonFormat) -> Optional[Annotation]:
             document_name = self.task.task_document.text_file_with_metadata.documentName
+
+            if not page_content:
+                print(f"Page content is empty for page {page_to_process.pageNumber}")
+                return None
+
             text_blocks = [content.text for content in page_content]
-            top_match = match_subtext(search_text, text_blocks)
 
-            if top_match and top_match[1] > process_content.highest_similarity:
-                highest_similarity_content = next(content for content in page_content if content.text == top_match[0])
-                print("-------------------")
-                print(f"Match found with score {top_match[1]}")
-                print(f"Match found with As Text {top_match[0][:10]} : Claim {search_text}")
-                print("-------------------")
+            if not text_blocks:
+                print(f"Text blocks are empty for page {page_to_process.pageNumber}")
+                return None
 
-                process_content.highest_similarity = top_match[1]
+            matched_block = match_subtext(search_text, text_blocks)
+
+            if matched_block and matched_block[1] > process_content.highest_similarity:
+                highest_similarity_content = page_content[matched_block[0]]
+
+                process_content.highest_similarity = matched_block[1]
                 return Annotation(
                     annotationText=highest_similarity_content.text,
                     documentName=document_name,
@@ -224,20 +256,69 @@ class ClaimsExtractionService:
                 )
             return None
 
-        process_content.highest_similarity = 0
+        process_content.highest_similarity = 0  # Reset for each call
         best_match = None
 
-        pages = self.task.task_document.text_file_with_metadata.pages
-        if page_range:
-            pages = pages[page_range[0]:page_range[1]]
+        if page_range is None:
+            raise ValueError("page_range cannot be None")
+
+        start_page, end_page = page_range
+        pages = self.task.task_document.text_file_with_metadata.pages[start_page:end_page]
 
         for page in pages:
             current_match = process_content(page.content, page)
-            if current_match:
+            if current_match and current_match.pageNumber >= start_page and current_match.pageNumber < end_page:
                 best_match = current_match
 
         return best_match
 
+
+    def match_claims_to_blocks(self, search_text: str, page_range: Optional[List[int]] = None) -> Optional[Annotation]:
+        
+        highest_match_similarity = 0  # Reset for each call
+        best_match_block = None
+
+        if page_range is None:
+            raise ValueError("page_range cannot be None")
+
+        start_page, end_page = page_range
+        pages = self.task.task_document.text_file_with_metadata.pages[start_page:end_page]
+        
+
+        for page in pages:
+            document_name = self.task.task_document.text_file_with_metadata.documentName
+            page_content = page.content
+
+            if not page_content:
+                print(f"Page content is empty for page {page.pageNumber}")
+                continue
+
+            text_blocks = [content.text for content in page_content]
+            text_blocks_normalized = [normalize_text(text) for text in text_blocks]
+            search_text_normalized = normalize_text(search_text)
+
+            if not text_blocks:
+                print(f"Text blocks are empty for page {page.pageNumber}")
+                continue
+
+            best_match_content_and_similarity = combined_best_match(search_text_normalized, text_blocks_normalized)
+
+            if best_match_content_and_similarity and best_match_content_and_similarity[1] > highest_match_similarity:
+                best_match_index = best_match_content_and_similarity[0]
+                highest_similarity_content = page_content[best_match_index]
+
+                highest_match_similarity = best_match_content_and_similarity[1]
+                best_match_block = Annotation(
+                    annotationText=highest_similarity_content.text,
+                    documentName=document_name,
+                    pageNumber=page.pageNumber,
+                    internalPageNumber=page.internalPageNumber,
+                    columnNumber=highest_similarity_content.columnIndex,
+                    paragraphNumber=highest_similarity_content.paragraphIndex,
+                    formattedInformation=f"{document_name}/p{page.internalPageNumber}/col{highest_similarity_content.columnIndex}/¶{highest_similarity_content.paragraphIndex}",
+                )
+
+        return best_match_block
 
     @staticmethod
     def extract_line_numbers_in_paragraph(claim: str, annotation_text: str):
