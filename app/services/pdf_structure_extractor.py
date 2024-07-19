@@ -100,7 +100,7 @@ class PDFStructureExtractor:
     @staticmethod
     def _calculate_internal_page_number(page_num, numbering_start_page, first_internal_number):
         if page_num < numbering_start_page:
-            return 0
+            return page_num + (first_internal_number - numbering_start_page) 
         return first_internal_number + (page_num - numbering_start_page)
 
     @staticmethod
