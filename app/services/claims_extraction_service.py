@@ -181,85 +181,6 @@ class ClaimsExtractionService:
         return PDFExtractionResult(full_text=full_text, images=images)
 
 
-
-    def match_claims_to_blocks_old(self, search_text: str, page_range: Optional[List[int]] = None) -> Optional[Annotation]:
-
-        def match_subtext(subtext: str, text_blocks: List[str], threshold: float = 0.1) -> Optional[Tuple[int, float]]:
-            if not text_blocks:
-                print("ERROR: text_blocks list is empty")
-
-            all_texts = [normalize_text(text) for text in text_blocks]
-
-            # Add the normalized subtext to the list of texts
-            subtext_normalized = normalize_text(subtext)
-            all_texts.append(subtext_normalized)
-
-            # Compute TF-IDF vectors for all texts
-            vectorizer = TfidfVectorizer().fit_transform(all_texts)
-            vectors = vectorizer.toarray()
-
-            if vectors.shape[0] < 2:
-                raise ValueError("Not enough text data to compute similarities")
-
-            # Calculate cosine similarity between the subtext and all document texts
-            similarities = cosine_similarity([vectors[-1]], vectors[:-1])[0]
-
-            # Find the most similar text
-            most_similar_index = similarities.argmax()
-            similarity_score = similarities[most_similar_index]
-
-            if similarity_score > threshold:
-                return most_similar_index, similarity_score
-            else:
-                return None
-
-        def process_content(page_content: List[PageContentItem], page_to_process: PageJsonFormat) -> Optional[Annotation]:
-            document_name = self.task.task_document.text_file_with_metadata.documentName
-
-            if not page_content:
-                print(f"Page content is empty for page {page_to_process.pageNumber}")
-                return None
-
-            text_blocks = [content.text for content in page_content]
-
-            if not text_blocks:
-                print(f"Text blocks are empty for page {page_to_process.pageNumber}")
-                return None
-
-            matched_block = match_subtext(search_text, text_blocks)
-
-            if matched_block and matched_block[1] > process_content.highest_similarity:
-                highest_similarity_content = page_content[matched_block[0]]
-
-                process_content.highest_similarity = matched_block[1]
-                return Annotation(
-                    annotationText=highest_similarity_content.text,
-                    documentName=document_name,
-                    pageNumber=page_to_process.pageNumber,
-                    internalPageNumber=page_to_process.internalPageNumber,
-                    columnNumber=highest_similarity_content.columnIndex,
-                    paragraphNumber=highest_similarity_content.paragraphIndex,
-                    formattedInformation=f"{document_name}/p{page_to_process.internalPageNumber}/col{highest_similarity_content.columnIndex}/¶{highest_similarity_content.paragraphIndex}",
-                )
-            return None
-
-        process_content.highest_similarity = 0  # Reset for each call
-        best_match = None
-
-        if page_range is None:
-            raise ValueError("page_range cannot be None")
-
-        start_page, end_page = page_range
-        pages = self.task.task_document.text_file_with_metadata.pages[start_page:end_page]
-
-        for page in pages:
-            current_match = process_content(page.content, page)
-            if current_match and current_match.pageNumber >= start_page and current_match.pageNumber < end_page:
-                best_match = current_match
-
-        return best_match
-
-
     def match_claims_to_blocks(self, search_text: str, page_range: Optional[List[int]] = None) -> Optional[Annotation]:
         
         highest_match_similarity = 0  # Reset for each call
@@ -308,58 +229,80 @@ class ClaimsExtractionService:
         return best_match_block
 
     @staticmethod
-    def extract_line_numbers_in_paragraph(claim: str, annotation_text: str):
-        
+    def extract_line_numbers_in_paragraph(claim: str, annotation_text: str, ratio_threshold: int = 95):
         def get_line_number(position, text):
             return text[:position].count('\n') + 1
-        
-        def handle_edge_case(claim, annotation_text):
-            if len(normalize_text(claim)) > len(normalize_text(annotation_text)):
-                total_lines = annotation_text.count('\n') + 1
-                return 1, total_lines
-            return None
-        
-        def find_phrase_position(phrase, text, from_start=True):
+
+        def normalize_text(text):
+            return ' '.join(text.lower().split())
+
+        def find_best_match(phrase, text):
             normalized_phrase = normalize_text(phrase)
             normalized_text = normalize_text(text)
-            
-            if from_start:
-                words = normalized_text.split()
-                for i in range(len(words)):
-                    substring = ' '.join(words[i:i+len(normalized_phrase.split())])
-                    ratio = fuzz.ratio(normalized_phrase, substring)
-                    if ratio > 90:
-                        position = normalized_text.index(substring)
-                        return position
+
+            best_ratio = 0
+            best_position = -1
+
+            window_size = len(normalized_phrase.split())
+            words = normalized_text.split()
+
+            for i in range(len(words) - window_size + 1):
+                substring = ' '.join(words[i:i+window_size])
+                ratio = fuzz.partial_ratio(normalized_phrase, substring)
+                if ratio > best_ratio:
+                    best_ratio = ratio
+                    best_position = i
+                    if best_ratio >= ratio_threshold:
+                        break
+
+            if best_ratio < ratio_threshold:
+                for window_size in range(window_size-1, 0, -1):
+                    for i in range(len(words) - window_size + 1):
+                        substring = ' '.join(words[i:i+window_size])
+                        ratio = fuzz.partial_ratio(normalized_phrase, substring)
+                        if ratio > best_ratio:
+                            best_ratio = ratio
+                            best_position = i
+                            if best_ratio >= ratio_threshold:
+                                break
+                    if best_ratio >= ratio_threshold:
+                        break
+
+            if best_position != -1:
+                original_start_pos = len(' '.join(words[:best_position]))
+                original_end_pos = len(' '.join(words[:best_position + window_size]))
+                return original_start_pos, original_end_pos, best_ratio
             else:
-                words = normalized_text.split()
-                for i in range(len(words)-1, -1, -1):
-                    substring = ' '.join(words[max(0, i-len(normalized_phrase.split())+1):i+1])
-                    ratio = fuzz.ratio(normalized_phrase, substring)
-                    if ratio > 90:
-                        position = normalized_text.index(substring) + len(substring)
-                        return position
-            
-            return -1
-        
-        edge_case_result = handle_edge_case(claim, annotation_text)
-        if edge_case_result:
-            return edge_case_result
-        
-        start_pos = find_phrase_position(claim, annotation_text, from_start=True)
-        end_pos = find_phrase_position(claim, annotation_text, from_start=False)
-        
-        print(f"Start Position: {start_pos}, End Position: {end_pos}")
-        
-        if start_pos == -1 or end_pos == -1:
+                return -1, -1, best_ratio
+
+        start_pos, end_pos, start_ratio = find_best_match(claim, annotation_text)
+
+        print(f"Initial positions: start={start_pos}, end={end_pos}")
+
+        if start_pos == -1 and end_pos == -1:
             return -1, -1
-        
+
+        if start_pos == -1:
+            start_pos = 0
+        if end_pos == -1:
+            end_pos = len(annotation_text) - 1
+
+        # Adjust start_pos to the beginning of the line
+        while start_pos > 0 and annotation_text[start_pos - 1] != '\n':
+            start_pos -= 1
+
+        # Adjust end_pos to the end of the line
+        while end_pos < len(annotation_text) - 1 and annotation_text[end_pos + 1] != '\n':
+            end_pos += 1
+
         start_line = get_line_number(start_pos, annotation_text)
         end_line = get_line_number(end_pos, annotation_text)
-        
+
+        print(f"Final positions: start={start_pos}, end={end_pos}")
+        print(f"Lines: start={start_line}, end={end_line}")
+
         return start_line, end_line
-    
-        
+
     @staticmethod
     def are_paragraphs_similar(paragraph1: str, paragraph2: str, threshold: float = 0.5) -> bool:
         """

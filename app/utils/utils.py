@@ -195,6 +195,7 @@ def combined_best_match(subtext: str, text_blocks: List[str], threshold: float =
     else:
         return None
 
+
 def fuzzy_word_similarity(text1: str, text2: str) -> float:
     words1 = text1.split()
     words2 = text2.split()
