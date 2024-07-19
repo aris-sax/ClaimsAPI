@@ -153,7 +153,7 @@ def find_best_match_using_sequence_matcher(subtext: str, text_blocks: List[str],
 
 
 
-def combined_best_match(subtext: str, text_blocks: List[str], threshold: float = 5.0) -> Optional[Tuple[int, float]]:
+def combined_best_match(subtext: str, text_blocks: List[str], threshold: float = 40) -> Optional[Tuple[int, float]]:
     """
     The combined_best_match function calculates the best match between a given subtext and a list of text blocks
     using a combination of three different similarity measures: TF-IDF similarity, SequenceMatcher similarity,
