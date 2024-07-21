@@ -61,7 +61,7 @@ class ClaimsExtractionService:
         self.task.task_status = TaskStatus.COMPLETE
 
 
-    def _run_get_page_ranges(self, doc: fitz.Document, number_of_selected_pages_per_chunk: int = 3) -> list[tuple[int, int]]:
+    def _run_get_page_ranges(self, doc: fitz.Document, number_of_selected_pages_per_chunk: int = 20) -> list[tuple[int, int]]:
         total_pages = doc.page_count
         page_ranges = []
 
@@ -78,11 +78,16 @@ class ClaimsExtractionService:
         pdf_extraction_results = self.extract_full_text_and_images(*page_range)
         claims = asyncio.run(self._run_extract_claims(pdf_extraction_results, page_range))
         print("Length of claims", len(claims))
-        filtered_claims = self._run_filter_claims_based_on_section(claims, ["introduction", "methodology", "results"])
-        print("Length of filtered claims", len(filtered_claims))
-        self._run_map_claims(filtered_claims, page_range)
-        return f"Processed pages {page_range}"
+        claims = [claim for claim in claims if claim.get('page') != "1"]
+        print("Length of claims after excluding page 1", len(claims))
         
+        # Filter claims based on specific sections
+        filtered_claims = self._run_filter_claims_based_on_section(claims, ["methodology", "results"])
+        print("Length of filtered claims", len(filtered_claims))
+        
+        # Map the filtered claims
+        self._run_map_claims(filtered_claims, page_range)
+    
         
     async def _run_extract_claims(self, pdf_extraction_results: PDFExtractionResult, page_range: Tuple[int, int]):
         try:
@@ -97,6 +102,7 @@ class ClaimsExtractionService:
 
 
     def _run_filter_claims_based_on_section(self, claims: List[dict], desired_sections: List[str]) -> List[dict]:
+        print([claim for claim in claims if claim.get('Section').lower() in desired_sections])
         return [claim for claim in claims if claim.get('Section').lower() in desired_sections]
 
 

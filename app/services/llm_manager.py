@@ -241,7 +241,7 @@ class LLMManager:
         return response == "true"
 
     @staticmethod
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(2),retry_error_callback=lambda retry_state: [])
     def extract_claims_with_claude(client: Anthropic, full_text: str, images: List[ExtractedImage]) -> List[Dict[str, Any]]:
         try:
             content = [
@@ -287,12 +287,14 @@ class LLMManager:
                             "        b. Patient outcomes and primary and secondary endpoints\n"
                             "        c. Efficacy of drug in treating a specific disease compared to control. Common efficacy metrics include progression free survival (pfs), overall survival (os), objective response rate (ORR), reduction in risk of death, etc.\n"
                             "        d. Adverse events associated with drug\n"
-                            "   - Include claims ranging from phrases to full paragraphs or tables\n"
-                            "   - Focus on extracting claims that are similar in style and content to the following examples:\n"
+                         "  - Generally articles start with the abstract section (which is a summary of all the sections in the paper) then introduction then methodology then results then discussion then conclusion.  We do not want claims from the abstract, introduction, discussion or conclusion sections. \n"
+                        "   Typically methodology or results sections will not be on the first page of a document and this is likely part of the abstract. \n"
+                        "   - Make sure that you do not include too many claims where the json response you provide hits a token limit. \n"
+                        "   - Make sure each claim is about one outcome or result but, where possible, combine lines next to each other about the same topics. \n"
                             "2. SOURCE IDENTIFICATION:\n"
                             "   - For each claim, note:\n"
-                            "       - Page number (use original document footer numbers)\n"
-                            "   - For each claim, determine if it was found in the abstract, introduction, methodology, results, discussion, or conclusion section. Only classify based on these 5 sections. Try to have at least a few claims from each\n"
+                            "       - Page number (starting from 1 then 2,3,4,5)\n"
+                            "   - For each claim, determine if it was found in the abstract, introduction, methodology, results, discussion, or conclusion section. Only classify based on these 5 sections. Typically methodology or results sections will not be on the first page of a document even if it seems like there is content there relevant to these sections. It is likely part of the abstract.\n"
                             "       - Citation in the format: \"FirstAuthor et al. Journal Name Volume(Issue):PageRange\"\n"
                             "3. JSON OUTPUT STRUCTURE:\n"
                             "   Create a JSON object with the following structure:\n"
@@ -300,7 +302,7 @@ class LLMManager:
                             "     \"extractedClaims\": [\n"
                             "         {\n"
                             "             \"statement\": \"Exact claim text\",\n"
-                            "             \"page\": \"Page number as listed in the document\",\n"
+                            "             \"page\": \"Page number meaning 1,2,3,4,5\",\n"
                             "             \"citation\": \"FirstAuthor et al. Journal Name Volume(Issue):PageRange\",\n"
                             "             \"Section\": \"introduction\"\n"
                             "         },\n"
@@ -317,15 +319,14 @@ class LLMManager:
                             "6. PROCESSING INSTRUCTIONS:\n"
                             "   - Analyze the entire document before starting output\n"
                             "   - Prioritize accuracy over speed\n"
-                            "   - If uncertain about a claim's relevance, include it\n"
                             "   - Do not summarize or paraphrase claims; use exact text\n"
-                            "   - Try to combine claims that are near each and about the same topic when possible without reducing quality.\n"
                             "7. SELF-CHECKING:\n"
                             "   - Verify all extracted information meets specified criteria\n"
                             "   - Make sure each claim is relevant to demonstrating the drug's efficacy, adverse events associated with the drug, or study design that would be relevant to a patient or physician interested in the drug. If it is not, then remove the entry from the JSON.\n"
                             "   - Double-check page numbers for accuracy\n"
-                            "   - Make sure each claim was classified into its section and the section provided is one of either 'abstract','introduction','methodology','results','discussion','conclusion',' \n"
-                            "   - Ensure JSON is well-formed and valid\n"
+                            "   - Make sure each claim was classified into its section and the section provided is one of either 'abstract','introduction','methodology','results','discussion','conclusion'. Make sure the section is correct. Generally articles start with abstract then introduction then methodology then results then discussion then conclusion.' \n"
+                            "   - Ensure claims are in chronological order from when they appear in the article\n"
+                            "   - Ensure JSON is well-formed,valid, and complete. Make sure you do not run out of tokens before the end of the json -- if you think you will, just include less claims\n"
                             "   - Make sure page numbers are accurate\n"
                             "   - Make sure all citations are consistent\n"
                             "Begin your output with the JSON object as specified in step 3. Do not include any text before or after the JSON output.",
@@ -337,11 +338,13 @@ class LLMManager:
             try:
                 completion = client.messages.create(
                     model="claude-3-5-sonnet-20240620",
-                    max_tokens=4000,
+                    max_tokens=4095,
                     temperature=0,
                     messages=messages,
                 )
-                parsed_json = json.loads(completion.content[0].text)
+                json_str=completion.content[0].text
+                print(json_str)
+                parsed_json = json.loads(json_str)
                 if "extractedClaims" not in parsed_json:
                     print(
                         f"Warning: 'extractedClaims' not found in parsed JSON. Raw response: {completion}"
@@ -350,12 +353,24 @@ class LLMManager:
                 claims = parsed_json["extractedClaims"]
 
                 # Filter out claims not in the desired sections
-                # desired_sections = {"introduction", "methodology", "results"}
-                # filtered_claims = [claim for claim in claims if claim.get('Section') in desired_sections]
+                #desired_sections = {"introduction", "methodology", "results"}
+                #filtered_claims = [claim for claim in claims if claim.get('Section') in desired_sections]
                 
                 return claims
             except Exception as e:
                 print(f"Error parsing JSON in extract_claims: {e}")
-                return []
+                try: 
+                    last_complete_object_index = json_str.rfind("},")
+                    if last_complete_object_index != -1:
+                        # Truncate the string to include only complete objects
+                        truncated_json = json_str[:last_complete_object_index + 1] + "\n    ]\n}"
+                        # Validate the truncated JSON
+                        json.loads(truncated_json)
+                        print(truncated_json)
+                        claims = truncated_json["extractedClaims"]
+                        return claims
+                except Exception:
+                    raise ValueError("Unable to fix incomplete JSON")
         except Exception as e:
+            raise
             print(f"Error in extract_claims: {e}")
