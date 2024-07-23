@@ -210,7 +210,6 @@ class LLMManager:
 
 
     @staticmethod
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
     def extract_journal_volume_issue_author_from_image(base64_image: str):
         def extract_journal_volume_issue_author_from_image(base64_image: str):
             
@@ -245,6 +244,11 @@ class LLMManager:
                     "location":"string", 
                     "lineExtracted": "string", 
                     "issue": "number"
+                },
+                "yearArticleWasPublished" : {
+                    "location":"string", 
+                    "lineExtracted": "string", 
+                    "yearArticleWasPublished": "number"
                 },
             }
             
@@ -289,13 +293,13 @@ class LLMManager:
                 return None
 
             model_response_as_json = response_json["choices"][0]["message"]["content"]
+            
             print(model_response_as_json)
             print("Extracted Correct journal, volume, and author out of text successfully.")
+            
             # Ensure that the parsed JSON is a list of dictionaries
             statements_data = json.loads(model_response_as_json)
-            page_number: int = statements_data
-
-            return page_number
+            return statements_data
 
         try:
             return retry_operation(

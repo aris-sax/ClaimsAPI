@@ -230,7 +230,8 @@ class ClaimsExtractionService:
                     internalPageNumber=page.internalPageNumber,
                     columnNumber=highest_similarity_content.columnIndex,
                     paragraphNumber=highest_similarity_content.paragraphIndex,
-                    formattedInformation=f"{file_as_metadata.authorName} et al.{file_as_metadata.journalName} {file_as_metadata.volume}({file_as_metadata.issue})/p{page.internalPageNumber}/col{highest_similarity_content.columnIndex}/¶{highest_similarity_content.paragraphIndex}",
+                    formattedInformation=f"{file_as_metadata.authorName.split()[-1]} et al.{file_as_metadata.year}/p{page.internalPageNumber}/col{highest_similarity_content.columnIndex}/¶{highest_similarity_content.paragraphIndex}",
+                    reference=f"{file_as_metadata.authorName.split()[-1]} et al.{file_as_metadata.journalName}.{file_as_metadata.year}: {file_as_metadata.volume}({file_as_metadata.issue})",
                 )
 
         return best_match_block

@@ -29,6 +29,7 @@ class DocumentJsonFormat(BaseModel):
     journalName: Optional[str] = None
     volume: Optional[str] = None
     issue: Optional[str] = None
+    year: Optional[str] = None
     pages: List[PageJsonFormat]
 
 
@@ -45,6 +46,7 @@ class Annotation(BaseModel):
     paragraphNumber: Optional[int] = None
     linesInParagraph: Optional[LineRange] = None
     formattedInformation: Optional[str] = None
+    reference: Optional[str] = None
 
 
 class ClaimResult(BaseModel):

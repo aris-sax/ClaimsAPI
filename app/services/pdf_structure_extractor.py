@@ -33,8 +33,9 @@ class PDFStructureExtractor:
 
 
             print("Extracting journal volume and author...")
-            author_name, journal_name, volume_number, issue_number = self._extract_journal_volume_issue_author(doc)
-            print(author_name, journal_name, volume_number)
+            article_metadata = self._extract_journal_volume_issue_year_author(doc)
+            print(article_metadata.get('firstAuthorName'), article_metadata.get('journalName'), article_metadata.get('volume'),
+                 article_metadata.get('issue'), article_metadata.get('year'))
 
             print("Extracting internal page numbering...")
             numbering_start_page, first_internal_number = self._extract_internal_page_numbering(doc)
@@ -42,10 +43,11 @@ class PDFStructureExtractor:
 
             document_name = self.task.task_document.raw_file.filename
             self.task.task_document.text_file_with_metadata = DocumentJsonFormat(documentName=document_name,
-                                                                                 authorName=author_name,
-                                                                                 journalName=journal_name,
-                                                                                 volume=volume_number,
-                                                                                 issue=issue_number,
+                                                                                 authorName=article_metadata.get('firstAuthorName'),
+                                                                                 journalName=article_metadata.get('journalName'),
+                                                                                 volume=article_metadata.get('volume'),
+                                                                                 issue=article_metadata.get('issue'),
+                                                                                 year=article_metadata.get('year'),
                                                                                  pages=[]
                                                                                 )
 
@@ -167,9 +169,9 @@ class PDFStructureExtractor:
         return 0, 0
 
 
-    def _extract_journal_volume_issue_author(
+    def _extract_journal_volume_issue_year_author(
         self, pdf_document: fitz.Document, max_pages_to_check: int = 5
-    ) -> Tuple[int, int]:
+    ) -> Tuple[str, str]:
         num_pages = len(pdf_document)
         pages_to_check = min(max_pages_to_check, num_pages)
         
@@ -183,6 +185,7 @@ class PDFStructureExtractor:
                 'journalName': claims_api['journalName'].get('journalName', ''),
                 'volume': str(claims_api['volume'].get('volume', '')),
                 'issue': str(claims_api['issue'].get('issue', '')),
+                'year': str(claims_api['yearArticleWasPublished'].get('yearArticleWasPublished', ''))
             }
             return extracted_data
 
@@ -191,7 +194,7 @@ class PDFStructureExtractor:
             data = extract_journal_volume_issue_author(current_page)
             formatted_data = format_output(data)
             if data:
-                return formatted_data['firstAuthorName'], formatted_data['journalName'], formatted_data['volume'], formatted_data['issue']
+                return formatted_data
             
         return None
 
