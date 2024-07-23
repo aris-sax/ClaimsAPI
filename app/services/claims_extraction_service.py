@@ -197,7 +197,8 @@ class ClaimsExtractionService:
 
         start_page, end_page = page_range
         pages = self.task.task_document.text_file_with_metadata.pages[start_page:end_page]
-        
+        file_as_metadata = self.task.task_document.text_file_with_metadata
+
 
         for page in pages:
             document_name = self.task.task_document.text_file_with_metadata.documentName
@@ -229,7 +230,7 @@ class ClaimsExtractionService:
                     internalPageNumber=page.internalPageNumber,
                     columnNumber=highest_similarity_content.columnIndex,
                     paragraphNumber=highest_similarity_content.paragraphIndex,
-                    formattedInformation=f"{document_name}/p{page.internalPageNumber}/col{highest_similarity_content.columnIndex}/¶{highest_similarity_content.paragraphIndex}",
+                    formattedInformation=f"{file_as_metadata.authorName} et al.{file_as_metadata.journalName} {file_as_metadata.volume}({file_as_metadata.issue})/p{page.internalPageNumber}/col{highest_similarity_content.columnIndex}/¶{highest_similarity_content.paragraphIndex}",
                 )
 
         return best_match_block

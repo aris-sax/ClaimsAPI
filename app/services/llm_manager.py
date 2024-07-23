@@ -11,6 +11,7 @@ from tenacity import AsyncRetrying,retry, stop_after_attempt, wait_fixed
 
 
 class LLMManager:
+    
     def __init__(self):
         self.openai_api_key = settings.OPENAI_API_KEY
         self.client = AzureOpenAI(
@@ -18,6 +19,7 @@ class LLMManager:
             azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
             api_version=settings.AZURE_OPENAI_API_VERSION,
         )
+
 
     @staticmethod
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
@@ -82,6 +84,7 @@ class LLMManager:
             print(f"Exception in convert_page_as_image_to_formatted_json: {e}")
             raise Exception(f"Failed to convert image to text: {e}")
 
+
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
     def match_claims_to_document(self, text: str, base64_image: str):
         print("Match claims in page and it's metadata.")
@@ -129,6 +132,7 @@ class LLMManager:
         )
 
         return json.loads(response.choices[0].message.content).get("response", {})
+
 
     @staticmethod
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
@@ -204,6 +208,107 @@ class LLMManager:
             print("Failed to convert image to text after retries: ", e)
             return {"isImageContainText": False, "text": ""}
 
+
+    @staticmethod
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
+    def extract_journal_volume_issue_author_from_image(base64_image: str):
+        def extract_journal_volume_issue_author_from_image(base64_image: str):
+            
+            azure_endpoint = (
+                f"https://{settings.AZURE_RESOURCE_NAME}.openai.azure.com/openai/"
+                f"deployments/{settings.AZURE_OPENAI_MODEL}/chat/"
+                f"completions?api-version={settings.AZURE_OPENAI_API_VERSION}"
+            )
+            
+            headers = {
+                "Content-Type": "application/json",
+                "api-key": settings.AZURE_OPENAI_API_KEY,
+            }
+            
+            sample_json_format =  {
+                "firstAuthorName" : {
+                    "location": "string", 
+                    "lineExtracted": "string", 
+                    "firstAuthorName": "string"
+                },
+                "journalName" : {
+                    "location":"string", 
+                    "lineExtracted": "string", 
+                    "journalName": "string"
+                },
+                "volume" : {
+                    "location":"string", 
+                    "lineExtracted": "string", 
+                    "volume": "number"
+                },
+                "issue" : {
+                    "location":"string", 
+                    "lineExtracted": "string", 
+                    "issue": "number"
+                },
+            }
+            
+            payload = {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "You are a vision model, your main task is to review medical document and extract journal name, volume number, and first/main author name "
+                                "from pdf page image. "
+                                "If you couldn't find the any value of those in pdf page image response "
+                                f"with this format {sample_json_format}. we use None as our default value. "
+                                "I want all your responses to be in the same JSON format, if you "
+                                f"could locate text please response in this format {sample_json_format}."
+                                "These data is usually located at the bottom (Footer) of the page or on the top section.",
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"{base64_image}",
+                                },
+                            },
+                        ],
+                    }
+                ],
+                "max_tokens": 1000,
+                "temperature": 0,
+                "response_format": {"type": "json_object"},
+            }
+            timeout_value = 60  # Timeout in seconds
+            response = requests.post(
+                azure_endpoint, headers=headers, json=payload, timeout=timeout_value
+            )
+            response_json = response.json()
+
+            if "error" in response_json:
+                raise Exception(response_json["error"]["message"])
+
+            if "choices" not in response_json:
+                return None
+
+            model_response_as_json = response_json["choices"][0]["message"]["content"]
+            print(model_response_as_json)
+            print("Extracted Correct journal, volume, and author out of text successfully.")
+            # Ensure that the parsed JSON is a list of dictionaries
+            statements_data = json.loads(model_response_as_json)
+            page_number: int = statements_data
+
+            return page_number
+
+        try:
+            return retry_operation(
+                extract_journal_volume_issue_author_from_image,
+                retries=3,
+                delay=10,
+                base64_image=base64_image,
+            )
+        except Exception as e:
+            print("Failed to extract journal, volume, issue, and author text after retries: ", e)
+            return None
+
+
     @staticmethod
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
     def classify_text_with_claude(client: Anthropic, text: str) -> bool:
@@ -239,6 +344,7 @@ class LLMManager:
         )
 
         return response == "true"
+
 
     @staticmethod
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(2),retry_error_callback=lambda retry_state: [])

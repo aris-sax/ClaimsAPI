@@ -25,6 +25,10 @@ class PageJsonFormat(BaseModel):
 
 class DocumentJsonFormat(BaseModel):
     documentName: str
+    authorName: Optional[str] = None
+    journalName: Optional[str] = None
+    volume: Optional[str] = None
+    issue: Optional[str] = None
     pages: List[PageJsonFormat]
 
 

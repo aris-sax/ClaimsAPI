@@ -19,6 +19,7 @@ class PDFStructureExtractor:
     A class to extract structured text blocks from a PDF document.
     """
 
+
     def __init__(self, task: ClaimsExtractionTask):
         self.task = task
         self.llm_manager_anthropic = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
@@ -26,21 +27,37 @@ class PDFStructureExtractor:
         self.document_text_blocks = []
         self.logger = logging.getLogger(__name__)
 
+
     def format_clinical_document(self):
         with fitz.open(stream=self.task.task_document.raw_file.content, filetype="pdf") as doc:
+
+
+            print("Extracting journal volume and author...")
+            author_name, journal_name, volume_number, issue_number = self._extract_journal_volume_issue_author(doc)
+            print(author_name, journal_name, volume_number)
+
             print("Extracting internal page numbering...")
             numbering_start_page, first_internal_number = self._extract_internal_page_numbering(doc)
+            
 
             document_name = self.task.task_document.raw_file.filename
-            self.task.task_document.text_file_with_metadata = DocumentJsonFormat(documentName=document_name, pages=[])
+            self.task.task_document.text_file_with_metadata = DocumentJsonFormat(documentName=document_name,
+                                                                                 authorName=author_name,
+                                                                                 journalName=journal_name,
+                                                                                 volume=volume_number,
+                                                                                 issue=issue_number,
+                                                                                 pages=[]
+                                                                                )
 
             print("Processing pages...")
             self.process_pages_async_cover(doc, numbering_start_page, first_internal_number)
 
         return self.task.task_document.text_file_with_metadata
 
+
     def process_pages_async_cover(self, doc, numbering_start_page, first_internal_number):
         self._process_pages_async(doc, numbering_start_page, first_internal_number)
+
 
     def _process_pages_async(self, doc, numbering_start_page, first_internal_number):
         MAX_WORKERS = 5
@@ -71,6 +88,7 @@ class PDFStructureExtractor:
             content=page_blocks_formatted,
         )
 
+
     def _process_pages(self, doc, numbering_start_page, first_internal_number):
         MAX_WORKERS = 5
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
@@ -81,6 +99,7 @@ class PDFStructureExtractor:
             for future in as_completed(futures):
                 page_formatted = future.result()
                 self.task.task_document.text_file_with_metadata.pages.append(page_formatted)
+
 
     def _process_page_data(self, doc, page_num, numbering_start_page, first_internal_number):
         current_page_internal_page_number = self._calculate_internal_page_number(page_num, numbering_start_page, first_internal_number)
@@ -97,11 +116,13 @@ class PDFStructureExtractor:
             content=page_blocks_formatted,
         )
 
+
     @staticmethod
     def _calculate_internal_page_number(page_num, numbering_start_page, first_internal_number):
         if page_num < numbering_start_page:
             return page_num + (first_internal_number - numbering_start_page) 
         return first_internal_number + (page_num - numbering_start_page)
+
 
     @staticmethod
     def _format_block(block):
@@ -111,6 +132,7 @@ class PDFStructureExtractor:
             columnIndex=block["column"],
             type="text"
         )
+
 
     def _extract_internal_page_numbering(
         self, pdf_document: fitz.Document, max_pages_to_check: int = 5
@@ -144,6 +166,36 @@ class PDFStructureExtractor:
 
         return 0, 0
 
+
+    def _extract_journal_volume_issue_author(
+        self, pdf_document: fitz.Document, max_pages_to_check: int = 5
+    ) -> Tuple[int, int]:
+        num_pages = len(pdf_document)
+        pages_to_check = min(max_pages_to_check, num_pages)
+        
+        def extract_journal_volume_issue_author(page):
+            page_as_image = PDFTextExtractor.pdf_page_to_base64(page)
+            return self.llm_manager.extract_journal_volume_issue_author_from_image(page_as_image)
+
+        def format_output(claims_api):
+            extracted_data = {
+                'firstAuthorName': claims_api['firstAuthorName'].get('firstAuthorName' , ''),
+                'journalName': claims_api['journalName'].get('journalName', ''),
+                'volume': str(claims_api['volume'].get('volume', '')),
+                'issue': str(claims_api['issue'].get('issue', '')),
+            }
+            return extracted_data
+
+        for current_page_num in range(pages_to_check):
+            current_page = pdf_document.load_page(current_page_num)
+            data = extract_journal_volume_issue_author(current_page)
+            formatted_data = format_output(data)
+            if data:
+                return formatted_data['firstAuthorName'], formatted_data['journalName'], formatted_data['volume'], formatted_data['issue']
+            
+        return None
+
+
     def process_page(self, page: Page, page_num: int, model: any, client: Anthropic) -> List[Dict[str, Any]]:
         print(f"Processing page {page_num + 1}")
 
@@ -164,8 +216,10 @@ class PDFStructureExtractor:
         print(f"Page {page_num + 1} processed successfully. Text blocks extracted: {len(text_blocks)}")
         return text_blocks
 
+
     def process_page_sync(self, page: Page, page_num: int, model: any, client: Anthropic) -> List[Dict[str, Any]]:
         return self.process_page(page, page_num, model, client)
+
 
     def append_text_blocks(self, deduplicated_texts: List[Dict[str, Any]], client: Anthropic) -> List[Dict[str, Any]]:
         text_blocks = []
