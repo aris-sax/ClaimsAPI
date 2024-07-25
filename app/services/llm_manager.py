@@ -438,18 +438,16 @@ class LLMManager:
             messages = [{"role": "user", "content": content}]
 
             try:
-                completion = client.messages_create(
+                completion = client.messages.create(
                     model="claude-3-5-sonnet-20240620",
                     max_tokens=8192,
                     temperature=0,
                     messages=messages,
                     extra_headers={"anthropic-beta": "max-tokens-3-5-sonnet-2024-07-15"}
                 )
-                json_str = completion["content"][0]["text"]
-                print(json_str)
-
-                # Escape double quotes inside the JSON string
+                json_str = completion.content[0].text
                 json_str = json_str.replace('\\"', '\\\\"').replace('"', '\\"').replace("\\\\\"", '\\\\"')
+                print(json_str)
                 
                 try:
                     parsed_json = json.loads(json_str)
@@ -479,7 +477,7 @@ def fix_truncated_json(json_str: str) -> str:
     last_complete_object_index = json_str.rfind("},")
     if last_complete_object_index != -1:
         # Truncate the string to include only complete objects
-        truncated_json = json_str[:last_complete_object_index + 1]
+        truncated_json = json_str[:last_complete_object_index + 1]+ ","
         # Close the JSON structure
         truncated_json += "\n    ]\n}"
         return truncated_json
@@ -492,7 +490,7 @@ def fix_truncated_json(json_str: str) -> str:
             return truncated_json
         else:
             raise ValueError("Unable to fix incomplete JSON")
-
+            
 def fix_truncated_json(json_str: str) -> str:
     # Find the last complete object
     last_complete_object_index = json_str.rfind("},")
