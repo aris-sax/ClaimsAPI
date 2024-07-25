@@ -7,8 +7,7 @@ from openai import AzureOpenAI
 from app.config import settings
 from app.pydantic_schemas.claims_extraction_task import ExtractedImage
 from app.utils.utils import retry_operation
-from tenacity import AsyncRetrying,retry, stop_after_attempt, wait_fixed
-
+from tenacity import AsyncRetrying, retry, stop_after_attempt, wait_fixed
 
 class LLMManager:
     
@@ -19,7 +18,6 @@ class LLMManager:
             azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
             api_version=settings.AZURE_OPENAI_API_VERSION,
         )
-
 
     @staticmethod
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
@@ -84,7 +82,6 @@ class LLMManager:
             print(f"Exception in convert_page_as_image_to_formatted_json: {e}")
             raise Exception(f"Failed to convert image to text: {e}")
 
-
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
     def match_claims_to_document(self, text: str, base64_image: str):
         print("Match claims in page and it's metadata.")
@@ -132,7 +129,6 @@ class LLMManager:
         )
 
         return json.loads(response.choices[0].message.content).get("response", {})
-
 
     @staticmethod
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
@@ -208,11 +204,9 @@ class LLMManager:
             print("Failed to convert image to text after retries: ", e)
             return {"isImageContainText": False, "text": ""}
 
-
     @staticmethod
     def extract_journal_volume_issue_author_from_image(base64_image: str):
         def extract_journal_volume_issue_author_from_image(base64_image: str):
-            
             azure_endpoint = (
                 f"https://{settings.AZURE_RESOURCE_NAME}.openai.azure.com/openai/"
                 f"deployments/{settings.AZURE_OPENAI_MODEL}/chat/"
@@ -312,7 +306,6 @@ class LLMManager:
             print("Failed to extract journal, volume, issue, and author text after retries: ", e)
             return None
 
-
     @staticmethod
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
     def classify_text_with_claude(client: Anthropic, text: str) -> bool:
@@ -349,9 +342,8 @@ class LLMManager:
 
         return response == "true"
 
-
     @staticmethod
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(2),retry_error_callback=lambda retry_state: [])
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(2), retry_error_callback=lambda retry_state: [])
     def extract_claims_with_claude(client: Anthropic, full_text: str, images: List[ExtractedImage]) -> List[Dict[str, Any]]:
         try:
             content = [
@@ -445,35 +437,38 @@ class LLMManager:
 
             messages = [{"role": "user", "content": content}]
 
-        try:
-        completion = client.messages.create(
-            model="claude-3-5-sonnet-20240620",
-            max_tokens=4095,
-            temperature=0,
-            messages=messages,
-        )
-        json_str = completion.content[0].text
-        print(json_str)
-        
-        try:
-            parsed_json = json.loads(json_str)
-            if "extractedClaims" not in parsed_json:
-                print(f"Warning: 'extractedClaims' not found in parsed JSON. Raw response: {completion}")
-                return []
-            claims = parsed_json["extractedClaims"]
-            return claims
-        except json.JSONDecodeError:
-            print("Error parsing JSON. Attempting to fix truncated JSON.")
-            fixed_json = fix_truncated_json(json_str)
-            parsed_json = json.loads(fixed_json)
-            if "extractedClaims" not in parsed_json:
-                print(f"Warning: 'extractedClaims' not found in fixed JSON. Raw response: {completion}")
-                return []
-            claims = parsed_json["extractedClaims"]
-            return claims
-    except Exception as e:
-        print(f"Error in extract_claims: {e}")
-        raise
+            try:
+                completion = client.messages.create(
+                    model="claude-3-5-sonnet-20240620",
+                    max_tokens=4095,
+                    temperature=0,
+                    messages=messages,
+                )
+                json_str = completion.content[0].text
+                print(json_str)
+                
+                try:
+                    parsed_json = json.loads(json_str)
+                    if "extractedClaims" not in parsed_json:
+                        print(f"Warning: 'extractedClaims' not found in parsed JSON. Raw response: {completion}")
+                        return []
+                    claims = parsed_json["extractedClaims"]
+                    return claims
+                except json.JSONDecodeError:
+                    print("Error parsing JSON. Attempting to fix truncated JSON.")
+                    fixed_json = fix_truncated_json(json_str)
+                    parsed_json = json.loads(fixed_json)
+                    if "extractedClaims" not in parsed_json:
+                        print(f"Warning: 'extractedClaims' not found in fixed JSON. Raw response: {completion}")
+                        return []
+                    claims = parsed_json["extractedClaims"]
+                    return claims
+            except Exception as e:
+                print(f"Error in extract_claims: {e}")
+                raise
+        except Exception as e:
+            print(f"Outer exception in extract_claims: {e}")
+            raise
 
 def fix_truncated_json(json_str: str) -> str:
     # Find the last complete object
