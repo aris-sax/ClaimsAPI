@@ -445,42 +445,51 @@ class LLMManager:
 
             messages = [{"role": "user", "content": content}]
 
-            try:
-                completion = client.messages.create(
-                    model="claude-3-5-sonnet-20240620",
-                    max_tokens=4095,
-                    temperature=0,
-                    messages=messages,
-                )
-                json_str=completion.content[0].text
-                print(json_str)
-                parsed_json = json.loads(json_str)
-                if "extractedClaims" not in parsed_json:
-                    print(
-                        f"Warning: 'extractedClaims' not found in parsed JSON. Raw response: {completion}"
-                    )
-                    return []
-                claims = parsed_json["extractedClaims"]
+        try:
+        completion = client.messages.create(
+            model="claude-3-5-sonnet-20240620",
+            max_tokens=4095,
+            temperature=0,
+            messages=messages,
+        )
+        json_str = completion.content[0].text
+        print(json_str)
+        
+        try:
+            parsed_json = json.loads(json_str)
+            if "extractedClaims" not in parsed_json:
+                print(f"Warning: 'extractedClaims' not found in parsed JSON. Raw response: {completion}")
+                return []
+            claims = parsed_json["extractedClaims"]
+            return claims
+        except json.JSONDecodeError:
+            print("Error parsing JSON. Attempting to fix truncated JSON.")
+            fixed_json = fix_truncated_json(json_str)
+            parsed_json = json.loads(fixed_json)
+            if "extractedClaims" not in parsed_json:
+                print(f"Warning: 'extractedClaims' not found in fixed JSON. Raw response: {completion}")
+                return []
+            claims = parsed_json["extractedClaims"]
+            return claims
+    except Exception as e:
+        print(f"Error in extract_claims: {e}")
+        raise
 
-                # Filter out claims not in the desired sections
-                #desired_sections = {"introduction", "methodology", "results"}
-                #filtered_claims = [claim for claim in claims if claim.get('Section') in desired_sections]
-                
-                return claims
-            except Exception as e:
-                print(f"Error parsing JSON in extract_claims: {e}")
-                try: 
-                    last_complete_object_index = json_str.rfind("},")
-                    if last_complete_object_index != -1:
-                        # Truncate the string to include only complete objects
-                        truncated_json = json_str[:last_complete_object_index + 1] + "\n    ]\n}"
-                        # Validate the truncated JSON
-                        json.loads(truncated_json)
-                        print(truncated_json)
-                        claims = truncated_json["extractedClaims"]
-                        return claims
-                except Exception:
-                    raise ValueError("Unable to fix incomplete JSON")
-        except Exception as e:
-            raise
-            print(f"Error in extract_claims: {e}")
+def fix_truncated_json(json_str: str) -> str:
+    # Find the last complete object
+    last_complete_object_index = json_str.rfind("},")
+    if last_complete_object_index != -1:
+        # Truncate the string to include only complete objects
+        truncated_json = json_str[:last_complete_object_index + 1]
+        # Close the JSON structure
+        truncated_json += "\n    ]\n}"
+        return truncated_json
+    else:
+        # If we can't find a complete object, try to close the JSON at the array level
+        last_complete_array_index = json_str.rfind("]")
+        if last_complete_array_index != -1:
+            truncated_json = json_str[:last_complete_array_index + 1]
+            truncated_json += "\n}"
+            return truncated_json
+        else:
+            raise ValueError("Unable to fix incomplete JSON")
