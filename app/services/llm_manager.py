@@ -431,7 +431,7 @@ class LLMManager:
                             "   - Ensure JSON is well-formed,valid, and complete. Make sure you do not run out of tokens before the end of the json -- if you think you will, just include less claims\n"
                             "   - Make sure page numbers are accurate\n"
                             "   - Make sure all citations are consistent\n"
-                            "Begin your output with the JSON object as specified in step 3. Do not include any text before or after the JSON output.",
+                            "Begin your output with the JSON object as specified in step 3. Do not include any text before or after the JSON output. Make sure the JSON is properly formatted please",
                 }
             )
 
