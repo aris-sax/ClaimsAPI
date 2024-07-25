@@ -1,6 +1,6 @@
 import json
 from typing import List, Any, Dict
-
+import re
 from anthropic import Anthropic
 import requests
 from openai import AzureOpenAI
@@ -343,7 +343,7 @@ class LLMManager:
         return response == "true"
 
     @staticmethod
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(2), retry_error_callback=lambda retry_state: [])
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(2),retry_error_callback=lambda retry_state: [])
     def extract_claims_with_claude(client: Anthropic, full_text: str, images: List[ExtractedImage]) -> List[Dict[str, Any]]:
         try:
             content = [
@@ -399,7 +399,7 @@ class LLMManager:
                             "   - For each claim, determine if it was found in the abstract, introduction, methodology, results, discussion, or conclusion section. Only classify based on these 5 sections. Typically methodology or results sections will not be on the first page of a document even if it seems like there is content there relevant to these sections. It is likely part of the abstract.\n"
                             "       - Citation in the format: \"FirstAuthor et al. Journal Name Volume(Issue):PageRange\"\n"
                             "3. JSON OUTPUT STRUCTURE:\n"
-                            "   Create a JSON object with the following structure:\n"
+                            "   Create a JSON object with the following structure. Please escape all double quotes within statement:\n"
                             "   {\n"
                             "     \"extractedClaims\": [\n"
                             "         {\n"
@@ -417,6 +417,7 @@ class LLMManager:
                             "5. JSON FORMATTING:\n"
                             "   - Ensure valid JSON format\n"
                             "   - Use double quotes for strings\n"
+                            "   - Please escape all double quotes within the statement to ensure no JSON errors.\n"
                             "   - Format JSON for readability with appropriate indentation\n"
                             "6. PROCESSING INSTRUCTIONS:\n"
                             "   - Analyze the entire document before starting output\n"
@@ -431,7 +432,7 @@ class LLMManager:
                             "   - Ensure JSON is well-formed,valid, and complete. Make sure you do not run out of tokens before the end of the json -- if you think you will, just include less claims\n"
                             "   - Make sure page numbers are accurate\n"
                             "   - Make sure all citations are consistent\n"
-                            "Begin your output with the JSON object as specified in step 3. Do not include any text before or after the JSON output. Make sure the JSON is properly formatted please",
+                            "Begin your output with the JSON object as specified in step 3. Do not include any text before or after the JSON output.",
                 }
             )
 
@@ -440,72 +441,40 @@ class LLMManager:
             try:
                 completion = client.messages.create(
                     model="claude-3-5-sonnet-20240620",
-                    max_tokens=8192,
+                    max_tokens=4095,
                     temperature=0,
                     messages=messages,
-                    extra_headers={"anthropic-beta": "max-tokens-3-5-sonnet-2024-07-15"}
                 )
-                json_str = completion.content[0].text
-                json_str = json_str.replace('\\"', '\\\\"').replace('"', '\\"').replace("\\\\\"", '\\\\"')
+                json_str=completion.content[0].text
                 print(json_str)
                 
-                try:
-                    parsed_json = json.loads(json_str)
-                    if "extractedClaims" not in parsed_json:
-                        print(f"Warning: 'extractedClaims' not found in parsed JSON. Raw response: {completion}")
-                        return []
-                    claims = parsed_json["extractedClaims"]
-                    return claims
-                except json.JSONDecodeError:
-                    print("Error parsing JSON. Attempting to fix truncated JSON.")
-                    fixed_json = fix_truncated_json(json_str)
-                    parsed_json = json.loads(fixed_json)
-                    if "extractedClaims" not in parsed_json:
-                        print(f"Warning: 'extractedClaims' not found in fixed JSON. Raw response: {completion}")
-                        return []
-                    claims = parsed_json["extractedClaims"]
-                    return claims
-            except Exception as e:
-                print(f"Error in extract_claims: {e}")
-                raise
-        except Exception as e:
-            print(f"Outer exception in extract_claims: {e}")
-            raise
+                parsed_json = json.loads(json_str)
+                if "extractedClaims" not in parsed_json:
+                    print(
+                        f"Warning: 'extractedClaims' not found in parsed JSON. Raw response: {completion}"
+                    )
+                    return []
+                claims = parsed_json["extractedClaims"]
 
-def fix_truncated_json(json_str: str) -> str:
-    # Find the last complete object
-    last_complete_object_index = json_str.rfind("},")
-    if last_complete_object_index != -1:
-        # Truncate the string to include only complete objects
-        truncated_json = json_str[:last_complete_object_index + 1]+ ","
-        # Close the JSON structure
-        truncated_json += "\n    ]\n}"
-        return truncated_json
-    else:
-        # If we can't find a complete object, try to close the JSON at the array level
-        last_complete_array_index = json_str.rfind("]")
-        if last_complete_array_index != -1:
-            truncated_json = json_str[:last_complete_array_index + 1]
-            truncated_json += "\n}"
-            return truncated_json
-        else:
-            raise ValueError("Unable to fix incomplete JSON")
-            
-def fix_truncated_json(json_str: str) -> str:
-    # Find the last complete object
-    last_complete_object_index = json_str.rfind("},")
-    if last_complete_object_index != -1:
-        # Truncate the string to include only complete objects
-        truncated_json = json_str[:last_complete_object_index + 1]+ ","
-        # Close the JSON structure
-        truncated_json += "\n    ]\n}"
-        return truncated_json
-    else:
-        # If we can't find a complete object, try to close the JSON at the array level
-        last_complete_array_index = json_str.rfind("]")
-        if last_complete_array_index != -1:
-            truncated_json = json_str[:last_complete_array_index + 1]
-            truncated_json += "\n}"
-            return truncated_json
-        else:
-            raise ValueError("Unable to fix incomplete JSON")
+                # Filter out claims not in the desired sections
+                #desired_sections = {"introduction", "methodology", "results"}
+                #filtered_claims = [claim for claim in claims if claim.get('Section') in desired_sections]
+                
+                return claims
+            except Exception as e:
+                print(f"Error parsing JSON in extract_claims: {e}")
+                try: 
+                    last_complete_object_index = json_str.rfind("},")
+                    if last_complete_object_index != -1:
+                        # Truncate the string to include only complete objects
+                        truncated_json = json_str[:last_complete_object_index + 1] + "\n    ]\n}"
+                        # Validate the truncated JSON
+                        json.loads(truncated_json)
+                        print(truncated_json)
+                        claims = truncated_json["extractedClaims"]
+                        return claims
+                except Exception:
+                    raise ValueError("Unable to fix incomplete JSON")
+        except Exception as e:
+            raise
+            print(f"Error in extract_claims: {e}")
