@@ -476,7 +476,7 @@ def fix_truncated_json(json_str: str) -> str:
     last_complete_object_index = json_str.rfind("},")
     if last_complete_object_index != -1:
         # Truncate the string to include only complete objects
-        truncated_json = json_str[:last_complete_object_index + 1]
+        truncated_json = json_str[:last_complete_object_index + 1]+ ","
         # Close the JSON structure
         truncated_json += "\n    ]\n}"
         return truncated_json
