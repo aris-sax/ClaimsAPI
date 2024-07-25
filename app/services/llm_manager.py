@@ -440,8 +440,10 @@ class LLMManager:
             try:
                 completion = client.messages.create(
                     model="claude-3-5-sonnet-20240620",
+                    max_tokens=8192,
                     temperature=0,
                     messages=messages,
+                    extra_headers={"anthropic-beta": "max-tokens-3-5-sonnet-2024-07-15"}
                 )
                 json_str = completion.content[0].text
                 print(json_str)
